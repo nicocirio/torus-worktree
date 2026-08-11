@@ -1,0 +1,68 @@
+#compdef worktree wt
+#
+# Tab-completion for the `worktree` command (and its `wt` alias). See
+# `worktree --help` (the "Shell completion" section) for how to wire this
+# into your shell.
+
+_worktree() {
+  local -a subcommands
+  subcommands=(
+    'up:create a worktree for a branch'
+    'open:jump straight to an existing worktree'
+    'remove:remove an existing worktree'
+    'rename:rename an existing worktree'
+    'list:list worktrees'
+    'config:configure IDE/port defaults'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe 'command' subcommands
+    return
+  fi
+
+  case ${words[2]} in
+    up)
+      if (( CURRENT == 3 )); then
+        # Both are valid: `worktree up <existing-worktree-name>` re-opens it
+        # (see `worktree --help`), same as typing its actual branch. One flat
+        # list, one _describe call — each candidate carries its own inline
+        # description ("existing worktree" vs "branch"). Bracing ${raw} is
+        # required: bare $raw:existing gets parsed as the ":e" parameter
+        # modifier (extension), silently eating "$raw:e" and leaving garbage.
+        local -a candidates raw
+        candidates=()
+        for raw in ${(f)"$(worktree __complete-worktrees 2>/dev/null)"}; do
+          candidates+=("${raw}:existing worktree")
+        done
+        for raw in ${(f)"$(worktree __complete-branches 2>/dev/null)"}; do
+          candidates+=("${raw}:branch")
+        done
+        _describe 'branch or worktree' candidates
+      fi
+      ;;
+    open)
+      if (( CURRENT == 3 )); then
+        local -a targets
+        targets=(${(f)"$(worktree __complete-open-targets 2>/dev/null)"})
+        _describe 'worktree (name or branch)' targets
+      fi
+      ;;
+    remove)
+      if (( CURRENT == 3 )); then
+        local -a names
+        names=(${(f)"$(worktree __complete-worktrees 2>/dev/null)"})
+        _describe 'worktree' names
+      fi
+      ;;
+    rename)
+      if (( CURRENT == 3 )); then
+        local -a names
+        names=(${(f)"$(worktree __complete-worktrees 2>/dev/null)"})
+        _describe 'worktree' names
+      fi
+      # CURRENT == 4 (the new name) is free text — nothing to suggest.
+      ;;
+  esac
+}
+
+_worktree "$@"
