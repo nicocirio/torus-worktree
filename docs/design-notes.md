@@ -37,6 +37,13 @@ small ignored `.torus-worktree-install` marker distinguishes a managed copy
 from an arbitrary development checkout so `uninstall` cannot remove the
 latter accidentally.
 
+The installer offers zsh completion only when zsh is the current shell. Its
+write is deliberately non-fatal: a missing zsh binary, a declined prompt, or
+a failure to update `.zshrc` prints an explanation but leaves the command
+installation intact. The completion lines are wrapped in unique markers so
+`uninstall` can remove only the block it owns, without touching unrelated
+shell configuration.
+
 Git is the version source of truth: `version` prints `git describe` (a release
 tag when available, otherwise the commit), and `update` fetches `origin/main`
 then fast-forwards only when the installation is clean and still on `main`.

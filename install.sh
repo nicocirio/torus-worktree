@@ -39,6 +39,46 @@ ensure_path() {
   fi
 }
 
+setup_zsh_completion() {
+  if [[ "${SHELL:-}" != */zsh ]]; then
+    echo "Skipping zsh completion: your current shell is not zsh. Commands are installed normally."
+    return 0
+  fi
+
+  if ! command -v zsh >/dev/null 2>&1; then
+    echo "Skipping zsh completion: zsh is not available. Commands are installed normally."
+    return 0
+  fi
+
+  local zshrc="$HOME/.zshrc"
+  local start_marker='# >>> torus-worktree completion >>>'
+  local end_marker='# <<< torus-worktree completion <<<'
+
+  if grep -Fqx "$start_marker" "$zshrc" 2>/dev/null; then
+    echo "zsh completion is already configured."
+    return 0
+  fi
+
+  read -r -p "Enable zsh tab completion for worktree and wt? [Y/n] " choice || true
+  if [[ "$choice" =~ ^[Nn]$ ]]; then
+    echo "Skipping zsh completion. Commands are installed normally."
+    return 0
+  fi
+
+  if ! {
+    printf '\n%s\n' "$start_marker"
+    printf 'source %q\n' "$INSTALL_DIR/completions/_worktree"
+    printf 'compdef _worktree worktree wt\n'
+    printf '%s\n' "$end_marker"
+  } >> "$zshrc"; then
+    echo "Could not enable zsh completion in $zshrc. Commands are installed normally." >&2
+    echo "You can configure it later using the instructions in the README." >&2
+    return 1
+  fi
+
+  echo "Enabled zsh completion in $zshrc. Open a new terminal to load it."
+}
+
 for command in git bash lsof; do
   require_command "$command"
 done
@@ -46,6 +86,8 @@ done
 if [[ -f "$SCRIPT_DIR/worktree.sh" && -f "$SCRIPT_DIR/run-server.sh" && -d "$SCRIPT_DIR/.git" ]]; then
   INSTALL_DIR="$SCRIPT_DIR"
   echo "Installing from existing checkout: $INSTALL_DIR"
+elif [[ -f "$INSTALL_DIR/worktree.sh" && -f "$INSTALL_DIR/run-server.sh" && -d "$INSTALL_DIR/.git" ]]; then
+  echo "Using existing installation: $INSTALL_DIR"
 elif [[ -e "$INSTALL_DIR" ]]; then
   echo "Installation directory already exists: $INSTALL_DIR" >&2
   echo "Run 'worktree update' to update it, or remove it before installing again." >&2
@@ -63,6 +105,9 @@ ln -sfn "$INSTALL_DIR/worktree.sh" "$BIN_DIR/wt"
 ln -sfn "$INSTALL_DIR/run-server.sh" "$BIN_DIR/run-server"
 
 ensure_path
+if ! setup_zsh_completion; then
+  echo "zsh completion was not configured; commands remain installed and usable."
+fi
 
 echo
 echo "torus-worktree installed."

@@ -96,10 +96,10 @@ with another's.
    worktree config
    ```
 
-4. (Optional) Enable zsh tab-completion — adds two lines to `~/.zshrc`, see
-   the "Shell completion" section of `worktree --help` for the exact lines
-   (the path depends on where you put this folder). Purely a convenience;
-   everything works fine without it.
+4. The installer offers to enable zsh tab-completion when zsh is your current
+   shell. It is optional: if zsh is unavailable or the setup cannot be
+   written, `worktree`, `wt`, and `run-server` still work normally. To enable
+   it later, see the "Shell completion" section of `worktree --help`.
 
 ## Basic usage
 

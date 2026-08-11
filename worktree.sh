@@ -133,6 +133,19 @@ remove_managed_link() {
   fi
 }
 
+remove_zsh_completion() {
+  local zshrc="$HOME/.zshrc" tmp
+  [[ -f "$zshrc" ]] || return
+  tmp="$(mktemp "${zshrc}.torus-worktree.XXXXXX")"
+
+  awk '
+    /^# >>> torus-worktree completion >>>$/ { skipping = 1; next }
+    /^# <<< torus-worktree completion <<<$/ { skipping = 0; next }
+    !skipping { print }
+  ' "$zshrc" > "$tmp"
+  mv "$tmp" "$zshrc"
+}
+
 cmd_uninstall() {
   local purge_config=false
   for arg in "$@"; do
@@ -159,6 +172,7 @@ cmd_uninstall() {
   remove_managed_link "$HOME/.local/bin/worktree" "$TOOL_ROOT/worktree.sh"
   remove_managed_link "$HOME/.local/bin/wt" "$TOOL_ROOT/worktree.sh"
   remove_managed_link "$HOME/.local/bin/run-server" "$TOOL_ROOT/run-server.sh"
+  remove_zsh_completion
   rm -rf "$TOOL_ROOT"
   $purge_config && rm -rf "$CONFIG_DIR"
   echo "torus-worktree uninstalled."
@@ -292,8 +306,9 @@ update:
 
 uninstall:
   Remove this managed installation and its worktree/wt/run-server symlinks
-  after confirmation. Personal settings in ~/.config/torus-worktree are kept
-  by default; pass --purge-config to remove them too.
+  and its installer-managed zsh completion after confirmation. Personal
+  settings in ~/.config/torus-worktree are kept by default; pass
+  --purge-config to remove them too.
 
 Shell completion (tab-complete branches for `up`, worktree names for
 `remove`) — optional, purely a convenience, everything above works fine
