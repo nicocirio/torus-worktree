@@ -77,7 +77,7 @@ with another's.
    `~/.local/bin`:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/nicocirio/torus-worktree/v0.1.0/install.sh | bash
+   curl -fsSL "https://raw.githubusercontent.com/nicocirio/torus-worktree/main/install.sh?cachebust=$(date +%s)" | bash
    ```
 
    The installer offers to add `~/.local/bin` to your shell PATH if needed.
