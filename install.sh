@@ -104,7 +104,7 @@ fi
 # Re-run the installed copy so new setup steps (such as shell completion) are
 # applied immediately, while the second run takes the existing-install path.
 if $cloned; then
-  exec "$INSTALL_DIR/install.sh"
+  exec bash "$INSTALL_DIR/install.sh"
 fi
 
 touch "$INSTALL_DIR/.torus-worktree-install"
