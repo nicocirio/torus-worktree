@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/lib/worktree-port.sh"
 
 CONFIG_DIR="$HOME/.config/torus-worktree"
 CONFIG_FILE="$CONFIG_DIR/config.sh"
+TOOL_ROOT="$SCRIPT_DIR"
 
 # Built-in defaults, used whenever $CONFIG_FILE doesn't exist or doesn't set a
 # given variable. Personalize them by running: worktree config
@@ -86,6 +87,83 @@ cmd_config() {
   echo "Saved $CONFIG_FILE"
 }
 
+cmd_version() {
+  local version
+  version="$(git -C "$TOOL_ROOT" describe --tags --always --dirty 2>/dev/null || echo "unknown")"
+  echo "torus-worktree $version"
+  echo "Installed at $TOOL_ROOT"
+}
+
+cmd_update() {
+  if [[ -n "$(git -C "$TOOL_ROOT" status --porcelain)" ]]; then
+    echo "Refusing to update: the tool installation has local changes." >&2
+    echo "Commit, stash, or discard them first: $TOOL_ROOT" >&2
+    exit 1
+  fi
+
+  local branch ahead behind
+  branch="$(git -C "$TOOL_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [[ "$branch" != "main" ]]; then
+    echo "Refusing to update: expected the main branch, found '${branch:-a detached commit}'." >&2
+    exit 1
+  fi
+
+  git -C "$TOOL_ROOT" fetch --tags origin main
+  read -r ahead behind < <(git -C "$TOOL_ROOT" rev-list --left-right --count HEAD...origin/main)
+
+  if [[ "$ahead" == "0" && "$behind" == "0" ]]; then
+    echo "torus-worktree is already up to date."
+    return
+  fi
+
+  if [[ "$ahead" != "0" ]]; then
+    echo "Refusing to update: local main has diverged from origin/main." >&2
+    exit 1
+  fi
+
+  git -C "$TOOL_ROOT" merge --ff-only origin/main
+  echo "Updated torus-worktree to $(git -C "$TOOL_ROOT" describe --tags --always)."
+}
+
+remove_managed_link() {
+  local link="$1" target="$2"
+  if [[ -L "$link" && "$(readlink "$link")" == "$target" ]]; then
+    rm "$link"
+    echo "Removed $link"
+  fi
+}
+
+cmd_uninstall() {
+  local purge_config=false
+  for arg in "$@"; do
+    case "$arg" in
+      --purge-config) purge_config=true ;;
+      *) echo "Unknown option for uninstall: $arg" >&2; exit 1 ;;
+    esac
+  done
+
+  if [[ ! -f "$TOOL_ROOT/.torus-worktree-install" ]]; then
+    echo "This checkout is not marked as an installed copy; refusing to remove it." >&2
+    echo "It is safe to remove only the symlinks manually if that is what you intended." >&2
+    exit 1
+  fi
+
+  echo "This removes the managed installation at $TOOL_ROOT."
+  $purge_config && echo "It will also remove $CONFIG_DIR."
+  read -r -p "Continue? [y/N] " choice || true
+  if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+    echo "Uninstall cancelled."
+    return
+  fi
+
+  remove_managed_link "$HOME/.local/bin/worktree" "$TOOL_ROOT/worktree.sh"
+  remove_managed_link "$HOME/.local/bin/wt" "$TOOL_ROOT/worktree.sh"
+  remove_managed_link "$HOME/.local/bin/run-server" "$TOOL_ROOT/run-server.sh"
+  rm -rf "$TOOL_ROOT"
+  $purge_config && rm -rf "$CONFIG_DIR"
+  echo "torus-worktree uninstalled."
+}
+
 usage() {
   cat <<'EOF'
 Creates and manages git worktrees for this project: sets up their dev
@@ -103,6 +181,9 @@ Usage:
   worktree rename <name> <new-name>
   worktree list [--size]
   worktree config
+  worktree version
+  worktree update
+  worktree uninstall [--purge-config]
   worktree -h | --help
 
 up:
@@ -200,6 +281,20 @@ config:
   overrides for IDE_CMD and DEFAULT_PORT. Optional — everything else works
   fine with the built-in defaults.
 
+version:
+  Show the installed tool version (the nearest Git tag or exact commit) and
+  its installation path.
+
+update:
+  Fetch origin/main and fast-forward the installed tool when a newer version
+  is available. Refuses to update when the installation has local changes or
+  is not on main.
+
+uninstall:
+  Remove this managed installation and its worktree/wt/run-server symlinks
+  after confirmation. Personal settings in ~/.config/torus-worktree are kept
+  by default; pass --purge-config to remove them too.
+
 Shell completion (tab-complete branches for `up`, worktree names for
 `remove`) — optional, purely a convenience, everything above works fine
 without it:
@@ -223,6 +318,18 @@ SUBCOMMAND="${1:-}"
 case "$SUBCOMMAND" in
   config)
     cmd_config
+    exit 0
+    ;;
+  version)
+    cmd_version
+    exit 0
+    ;;
+  update)
+    cmd_update
+    exit 0
+    ;;
+  uninstall)
+    cmd_uninstall "$@"
     exit 0
     ;;
   -h|--help|"")

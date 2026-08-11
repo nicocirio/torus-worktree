@@ -8,22 +8,42 @@ understand or extend this tool quickly.
 
 ## Architecture at a glance
 
-Four files, no dependencies beyond `bash`/`zsh` + git + the project's own
+Five files, no dependencies beyond `bash`/`zsh` + git + the project's own
 toolchain (yarn, npm, mix, gleam):
 
 - `worktree.sh` — the main tool. A single script, dispatching on the first
-  argument (`up`, `open`, `remove`, `rename`, `list`, `config`), plus hidden
-  `__complete-*` subcommands used only by the completion function.
+  argument (`up`, `open`, `remove`, `rename`, `list`, `config`, `version`,
+  `update`, `uninstall`), plus hidden `__complete-*` subcommands used only by
+  the completion function.
 - `run-server.sh` — standalone, deliberately not configurable. See "Why
   `run-server` isn't personal" below.
 - `lib/worktree-port.sh` — shared `find_free_port` and `oli.env` port-sync
   helpers used by both commands.
 - `completions/_worktree` — zsh-only tab completion (bash was explicitly
   scoped out — see "Shell completion" below).
+- `install.sh` — clones a managed installation when run via curl, or wires up
+  symlinks when run from an existing checkout.
 
 `~/.local/bin/worktree`, `~/.local/bin/wt`, and `~/.local/bin/run-server`
 are symlinks into this folder, not copies and not shell functions. See "Why
 symlinks, not shell functions" below.
+
+### Installation, update, and uninstall
+
+`install.sh` makes `~/.local/share/torus-worktree` the default managed
+installation directory and creates absolute symlinks in `~/.local/bin`. It
+can also run from a checkout directly, which is useful for contributors. A
+small ignored `.torus-worktree-install` marker distinguishes a managed copy
+from an arbitrary development checkout so `uninstall` cannot remove the
+latter accidentally.
+
+Git is the version source of truth: `version` prints `git describe` (a release
+tag when available, otherwise the commit), and `update` fetches `origin/main`
+then fast-forwards only when the installation is clean and still on `main`.
+This avoids a separate version file that could drift from the code. `uninstall`
+removes only symlinks that still point at the managed copy, then removes that
+copy after confirmation; personal config survives unless `--purge-config` is
+requested.
 
 ## Key decisions and why
 

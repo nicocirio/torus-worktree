@@ -72,43 +72,31 @@ with another's.
 
 ## Setup
 
-1. Put `worktree.sh` and `run-server.sh` somewhere on your machine — for
-   example, clone/copy this whole folder to `~/dev-tools/torus-worktree/`
-   (the examples below assume that path; adjust if you used another one).
-
-2. Make them runnable as plain commands (`worktree`, `run-server`, no
-   `.sh`), without editing your shell config. If you already have
-   `~/.local/bin` on your `$PATH` (check with `echo $PATH | tr ':' '\n' |
-   grep .local/bin`), just symlink them there:
+1. Install it. This clones a managed copy into `~/.local/share/torus-worktree`
+   and creates `worktree`, `wt`, and `run-server` symlinks in
+   `~/.local/bin`:
 
    ```bash
-   mkdir -p ~/.local/bin
-   ln -sf ~/dev-tools/torus-worktree/worktree.sh ~/.local/bin/worktree
-   ln -sf ~/dev-tools/torus-worktree/worktree.sh ~/.local/bin/wt          # optional short alias
-   ln -sf ~/dev-tools/torus-worktree/run-server.sh ~/.local/bin/run-server
+   curl -fsSL https://raw.githubusercontent.com/nicocirio/torus-worktree/main/install.sh | bash
    ```
 
-   If `~/.local/bin` isn't on your `$PATH` yet, add this to your shell
-   config (`~/.zshrc` for zsh, `~/.bashrc`/`~/.bash_profile` for bash) and
-   open a new terminal:
+   The installer offers to add `~/.local/bin` to your shell PATH if needed.
+   To inspect it first instead, clone the repository and run `./install.sh`
+   from its root.
 
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
-
-3. Confirm it works:
+2. Confirm it works:
 
    ```bash
    worktree --help
    ```
 
-4. (Optional) Set your personal IDE command and default port:
+3. (Optional) Set your personal IDE command and default port:
 
    ```bash
    worktree config
    ```
 
-5. (Optional) Enable zsh tab-completion — adds two lines to `~/.zshrc`, see
+4. (Optional) Enable zsh tab-completion — adds two lines to `~/.zshrc`, see
    the "Shell completion" section of `worktree --help` for the exact lines
    (the path depends on where you put this folder). Purely a convenience;
    everything works fine without it.
@@ -129,6 +117,19 @@ run-server                            # from inside a worktree, start Phoenix on
 Run `worktree --help` for the full picture — every flag, how `up` behaves
 when the branch or the worktree already exists, and the shell completion
 setup.
+
+## Updating and uninstalling
+
+```bash
+worktree version                   # show the installed commit or release tag
+worktree update                    # fast-forward to the latest origin/main
+worktree uninstall                 # remove commands and installed copy; keep personal config
+worktree uninstall --purge-config  # also remove ~/.config/torus-worktree
+```
+
+`update` refuses to overwrite local changes in the installation. Releases
+are identified with Git tags; until a tag exists, `version` shows the exact
+commit.
 
 ## Future ideas
 
