@@ -16,6 +16,8 @@ _worktree() {
     'version:show installed version and location'
     'update:update the installed tool'
     'uninstall:remove the installed tool'
+    '--help:show help'
+    '-h:show help'
   )
 
   if (( CURRENT == 2 )); then
