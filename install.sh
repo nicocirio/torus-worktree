@@ -6,7 +6,11 @@ set -euo pipefail
 REPO_URL="https://github.com/nicocirio/torus-worktree.git"
 INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/torus-worktree"
 BIN_DIR="$HOME/.local/bin"
-SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BASH_SOURCE is unset when this script is piped to `bash` from curl. In that
+# case $0 is enough: it resolves to `bash`, so this directory will not look
+# like a checkout and the installer follows the clone-from-GitHub path below.
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
