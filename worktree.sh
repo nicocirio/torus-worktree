@@ -198,7 +198,7 @@ Usage:
   worktree version
   worktree update
   worktree uninstall [--purge-config]
-  worktree -h | --help
+  worktree help | -h | --help
 
 up:
   Arguments:
@@ -347,7 +347,7 @@ case "$SUBCOMMAND" in
     cmd_uninstall "$@"
     exit 0
     ;;
-  -h|--help|"")
+  help|-h|--help|"")
     usage
     exit 0
     ;;

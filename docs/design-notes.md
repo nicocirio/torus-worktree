@@ -13,8 +13,8 @@ toolchain (yarn, npm, mix, gleam):
 
 - `worktree.sh` — the main tool. A single script, dispatching on the first
   argument (`up`, `open`, `remove`, `rename`, `list`, `config`, `version`,
-  `update`, `uninstall`), plus hidden `__complete-*` subcommands used only by
-  the completion function.
+  `update`, `uninstall`, `help`), plus hidden `__complete-*` subcommands used
+  only by the completion function.
 - `run-server.sh` — standalone, deliberately not configurable. See "Why
   `run-server` isn't personal" below.
 - `lib/worktree-port.sh` — shared `find_free_port` and `oli.env` port-sync

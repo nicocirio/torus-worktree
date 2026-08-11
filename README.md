@@ -105,6 +105,7 @@ with another's.
 
 ```bash
 worktree config                       # optionally set your IDE command and preferred starting port
+worktree help                         # show the command reference
 worktree up MER-1234-some-branch      # create a worktree, set it up, open your IDE
 worktree open a-more-descriptive-name # jump straight to one you already have (by folder name or branch)
 worktree list                         # see your worktrees (fast, no sizes)
