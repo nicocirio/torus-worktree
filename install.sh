@@ -28,7 +28,10 @@ ensure_path() {
   [[ "${SHELL:-}" == */bash ]] && shell_rc="$HOME/.bashrc"
 
   echo "Note: $BIN_DIR is not on your PATH in this shell."
-  read -r -p "Add it to $shell_rc for future shells? [Y/n] " choice || true
+  if [[ ! -r /dev/tty ]] || ! read -r -p "Add it to $shell_rc for future shells? [Y/n] " choice </dev/tty; then
+    echo "Could not prompt for PATH setup (no terminal input). Commands are installed, but add $BIN_DIR to PATH manually." >&2
+    return 0
+  fi
   if [[ ! "$choice" =~ ^[Nn]$ ]]; then
     if ! grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$shell_rc" 2>/dev/null; then
       printf '\n# Local command-line tools\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$shell_rc"
@@ -59,7 +62,10 @@ setup_zsh_completion() {
     return 0
   fi
 
-  read -r -p "Enable zsh tab completion for worktree and wt? [Y/n] " choice || true
+  if [[ ! -r /dev/tty ]] || ! read -r -p "Enable zsh tab completion for worktree and wt? [Y/n] " choice </dev/tty; then
+    echo "Skipping zsh completion: could not prompt for a choice. Commands are installed normally." >&2
+    return 0
+  fi
   if [[ "$choice" =~ ^[Nn]$ ]]; then
     echo "Skipping zsh completion. Commands are installed normally."
     return 0
