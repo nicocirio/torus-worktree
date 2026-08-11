@@ -24,7 +24,9 @@ _worktree() {
     # subcommands even before the user has typed a dash.
     local -a help_options help_descriptions
     help_options=(--help -h)
-    help_descriptions=('show help' 'show help')
+    # compadd's -d replaces the displayed completion rather than adding a
+    # description column, so include the option name in each display string.
+    help_descriptions=('--help  -- show help' '-h      -- show help')
     _describe 'command' subcommands
     compadd -U -d help_descriptions -- "${help_options[@]}"
     return
