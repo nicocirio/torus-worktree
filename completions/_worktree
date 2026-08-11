@@ -19,16 +19,18 @@ _worktree() {
   )
 
   if (( CURRENT == 2 )); then
-    # zsh normally filters dash-prefixed candidates from a blank command
-    # position. Add the global options directly so they appear alongside the
-    # subcommands even before the user has typed a dash.
-    local -a help_options help_descriptions
-    help_options=(--help -h)
-    # compadd's -d replaces the displayed completion rather than adding a
-    # description column, so include the option name in each display string.
-    help_descriptions=('--help  -- show help' '-h      -- show help')
     _describe 'command' subcommands
-    compadd -U -d help_descriptions -- "${help_options[@]}"
+
+    # Keep global options separate from subcommands. Adding them at a blank
+    # command position interferes with zsh's partial subcommand matching
+    # (for example, `wt uni<Tab>`). Once the user starts an option, offer the
+    # two help spellings directly.
+    if [[ "$PREFIX" == -* ]]; then
+      local -a help_options help_descriptions
+      help_options=(--help -h)
+      help_descriptions=('--help  -- show help' '-h      -- show help')
+      compadd -U -d help_descriptions -- "${help_options[@]}"
+    fi
     return
   fi
 
