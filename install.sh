@@ -83,6 +83,7 @@ for command in git bash lsof; do
   require_command "$command"
 done
 
+cloned=false
 if [[ -f "$SCRIPT_DIR/worktree.sh" && -f "$SCRIPT_DIR/run-server.sh" && -d "$SCRIPT_DIR/.git" ]]; then
   INSTALL_DIR="$SCRIPT_DIR"
   echo "Installing from existing checkout: $INSTALL_DIR"
@@ -96,6 +97,14 @@ else
   mkdir -p "$(dirname "$INSTALL_DIR")"
   echo "Cloning torus-worktree into $INSTALL_DIR"
   git clone "$REPO_URL" "$INSTALL_DIR"
+  cloned=true
+fi
+
+# A versioned bootstrap script can be older than the checkout it just cloned.
+# Re-run the installed copy so new setup steps (such as shell completion) are
+# applied immediately, while the second run takes the existing-install path.
+if $cloned; then
+  exec "$INSTALL_DIR/install.sh"
 fi
 
 touch "$INSTALL_DIR/.torus-worktree-install"
