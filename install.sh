@@ -62,6 +62,24 @@ setup_zsh_completion() {
     return 0
   fi
 
+  cat <<'EOF'
+
+Optional: enable zsh tab completion?
+
+It lets Tab complete valid commands, branches, and existing worktree names.
+For example:
+
+  wt <Tab>              -> up, open, remove, rename, list, config, version,
+                           update, uninstall
+  wt up MER-<Tab>       -> matching branches
+  wt open <Tab>         -> existing worktrees or their branches
+  wt remove <Tab>       -> existing worktree names
+  wt uninstall <Tab>    -> --purge-config
+
+This adds a small marked block to ~/.zshrc. It does not affect the commands,
+and worktree uninstall removes that block automatically.
+EOF
+
   if [[ ! -r /dev/tty ]] || ! read -r -p "Enable zsh tab completion for worktree and wt? [Y/n] " choice </dev/tty; then
     echo "Skipping zsh completion: could not prompt for a choice. Commands are installed normally." >&2
     return 0

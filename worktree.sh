@@ -310,9 +310,9 @@ uninstall:
   settings in ~/.config/torus-worktree are kept by default; pass
   --purge-config to remove them too.
 
-Shell completion (tab-complete branches for `up`, worktree names for
-`remove`) — optional, purely a convenience, everything above works fine
-without it:
+Shell completion (tab-complete subcommands, branches for `up`, worktree names
+for `open`/`remove`/`rename`, and `uninstall --purge-config`) — optional,
+purely a convenience, everything above works fine without it:
   zsh (default on modern macOS):
     Add these two lines near the end of ~/.zshrc, then open a new terminal:
       source /path/to/completions/_worktree

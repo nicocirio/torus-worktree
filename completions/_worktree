@@ -13,6 +13,9 @@ _worktree() {
     'rename:rename an existing worktree'
     'list:list worktrees'
     'config:configure IDE/port defaults'
+    'version:show installed version and location'
+    'update:update the installed tool'
+    'uninstall:remove the installed tool'
   )
 
   if (( CURRENT == 2 )); then
@@ -61,6 +64,11 @@ _worktree() {
         _describe 'worktree' names
       fi
       # CURRENT == 4 (the new name) is free text — nothing to suggest.
+      ;;
+    uninstall)
+      if (( CURRENT == 3 )); then
+        _values 'option' '--purge-config[also remove personal configuration]'
+      fi
       ;;
   esac
 }

@@ -261,7 +261,9 @@ built with explicit `return` concatenation for line breaks:
 flat list (each candidate has its own inline description) since typing
 either is valid for `up` — see "already exists → open instead" above.
 `open`/`remove`/`rename` complete against worktree names only (`remove`,
-`rename`) or names+branches (`open`, matching what it accepts).
+`rename`) or names+branches (`open`, matching what it accepts). The static
+commands `version` and `update` need no argument completion; `uninstall`
+also offers `--purge-config`.
 
 Bash completion was explicitly scoped out — the zsh function uses
 `_describe`, `${(f)...}`, etc. with no bash equivalent; documented as "ask

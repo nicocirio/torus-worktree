@@ -65,8 +65,8 @@ with another's.
   worktree's `oli.env` (`run-server`), from inside whichever worktree you
   want to serve.
   Not personal/configurable on purpose, so it works the same for anyone.
-- `completions/_worktree` — optional zsh tab-completion (branches for `up`,
-  worktree names for `remove`).
+- `completions/_worktree` — optional zsh tab-completion for subcommands and
+  their contextual branches, worktree names, and options.
 - `lib/worktree-port.sh` — shared port discovery and `oli.env` synchronization
   used by both commands.
 
