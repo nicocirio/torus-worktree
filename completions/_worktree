@@ -16,12 +16,17 @@ _worktree() {
     'version:show installed version and location'
     'update:update the installed tool'
     'uninstall:remove the installed tool'
-    '--help:show help'
-    '-h:show help'
   )
 
   if (( CURRENT == 2 )); then
+    # zsh normally filters dash-prefixed candidates from a blank command
+    # position. Add the global options directly so they appear alongside the
+    # subcommands even before the user has typed a dash.
+    local -a help_options help_descriptions
+    help_options=(--help -h)
+    help_descriptions=('show help' 'show help')
     _describe 'command' subcommands
+    compadd -U -d help_descriptions -- "${help_options[@]}"
     return
   fi
 
