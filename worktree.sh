@@ -1192,7 +1192,11 @@ else
 
   # Prefer the ref git already recorded for the remote's default branch (no
   # network call); fall back to probing common names if that isn't set.
-  default_branch="$(git -C "$BASE_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+  # `|| true`: no origin/HEAD ref (no remote at all, or one whose default
+  # branch was never recorded) makes symbolic-ref exit 1 — under pipefail,
+  # that would otherwise kill the whole script right here, before ever
+  # showing the "not found" prompt below.
+  default_branch="$(git -C "$BASE_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
   if [[ -z "$default_branch" ]]; then
     for candidate in main master; do
       if git -C "$BASE_ROOT" show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
