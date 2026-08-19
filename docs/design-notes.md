@@ -60,16 +60,26 @@ requested.
 standard for testing shell CLIs specifically (setup/teardown per test,
 `run`/`$status`/`$output` assertions), and it's a dev-only dependency: never
 installed or required to actually use `worktree`/`wt`/`run-server`, same
-category as needing `git` to develop this repo at all. Coverage started with
-`remove` (the newest, highest-risk surface — see `test/remove.bats` and
-`test/select_interactive.bats`); other subcommands aren't covered yet.
+category as needing `git` to develop this repo at all. Coverage: `remove`
+(`test/remove.bats`, `test/select_interactive.bats`), the `__complete-*`
+data layer (`test/completion_data.bats` — the zsh widget itself, `_describe`
+et al., is not covered; see below), `list`, `rename`, `config`, `version`,
+`open` (`test/list.bats`, `test/rename.bats`, `test/config.bats`,
+`test/open.bats`), and `update`/`uninstall`
+(`test/update_uninstall.bats`, against a disposable fake install — see
+below). `up` isn't covered yet; it needs stubbed `yarn`/`npm`/`mix`/`gleam`
+to test without the full oli-torus toolchain, which none of the above
+required.
 
 Every test gets its own throwaway repo satisfying the oli-torus guard (fake
 `mix.exs`/`assets/automation/`/`gleam/gleam.toml`) and its own fake `$HOME`
 (`test/test_helper.bash`), so the suite can't read or write the developer's
 real `~/.config/torus-worktree`, `~/.cache/torus-worktree`, or worktrees —
 same reasoning as the repo-identity guard in `worktree.sh` itself, applied to
-testing.
+testing. The fake `$HOME` also gets a no-op `osascript` stub on `$PATH`,
+since `open`/`up`'s "worktree ready" dialog (see "macOS notification" below)
+would otherwise pop a real dialog on the developer's screen during every
+`open` test.
 
 `remove --select` hard-requires a real terminal (`-t 0`/`-t 1`), which bats'
 plain `run` doesn't provide. `test/support/run_select.exp` drives it through
@@ -80,6 +90,25 @@ we hit" below) got a permanent regression test
 (`select: toggling the LAST-listed item...`), since that bug only reproduced
 through a real interactive run, never through static analysis or a
 non-interactive one-shot command.
+
+`update`/`uninstall` operate on `$TOOL_ROOT` — wherever the invoked
+`worktree.sh` physically lives — and `uninstall` does `rm -rf "$TOOL_ROOT"`,
+so testing them against the real dev checkout is out of the question.
+`test/support/fake_install.bash` builds a full disposable copy instead (its
+own git history, its own bare "origin" remote, `$HOME/.local/bin` symlinks
+wired up exactly like `install.sh` would), and that's what surfaced the
+`remove_zsh_completion` bug below — a fresh fake install's `$HOME` has no
+`.zshrc`, a state real developer machines essentially never have but a
+clean test fixture always starts in.
+
+Tab completion's zsh widget itself (`_describe`, `compadd`, the `case` that
+picks what to complete at which position) isn't covered — zsh has its own
+mechanism for this (`zpty`, the same one its own test suite uses via
+`comptest`, driving a real interactive zsh through a pty and reading back
+what actually got completed), but it's meaningfully more complex and
+fragile to maintain than everything above, so it was deliberately scoped
+out for now in favor of just testing the plain-bash data the widget
+consumes (`__complete-*`).
 
 ## Key decisions and why
 
@@ -380,7 +409,33 @@ if you need it" in `--help` rather than half-implemented.
   the resolved form, so a test helper comparing raw `mktemp -d` output
   against git's output silently never matched (every "worktree still
   exists" assertion failed, even when it did). Fixed by resolving with
-  `cd "$dir" && pwd -P` immediately after creating it.
+  `cd "$dir" && pwd -P` immediately after creating it. The same
+  unresolved-path issue also broke a test fixture's own `ln -sfn` target,
+  which is a separate but related lesson: whenever you compare or store a
+  path that has to line up with something git (or another tool) reports
+  back resolved, canonicalize it immediately after `mktemp -d`, not later.
+- **`grep -v` on zero input lines exits 1 — deadly under `pipefail`.**
+  `__complete-branches` piped `git for-each-ref refs/remotes/origin` (empty
+  when there's no `origin` remote, or no remote branches at all) into
+  `grep -v '^origin/HEAD$'` — grep exits 1 when it has nothing to read,
+  and with `pipefail` that took the whole script down in silence, before
+  it ever printed anything. Never manifested against the real oli-torus
+  repo (it always has `origin`), only surfaced once a test spun up a repo
+  with no remote configured at all. Fixed with a trailing `|| true`.
+- **A bare `return` reuses the exit status of whatever just failed the
+  test before it — same class of bug as the `remove --select` regression
+  above, found the same way (a real execution, not code review).**
+  `remove_zsh_completion` did `[[ -f "$zshrc" ]] || return` — when there's
+  no `.zshrc`, that `return` carries the `1` from the failed `-f` test,
+  and since the function is called as a plain statement in
+  `cmd_uninstall`, that `1` killed the entire uninstall under `set -e`
+  before it ever removed anything or printed a result — silently, and
+  only for a `$HOME` with no `.zshrc` at all, which never happens on a
+  real dev machine but is exactly the default state of a fresh test
+  fixture. Fixed with an explicit `return 0`. Same general lesson as
+  before, restated because it recurred: an implicit/inherited exit status
+  on an early return or a function's last statement is never safe when
+  that status depends on data — make it explicit.
 
 ## Things we tried and reverted
 

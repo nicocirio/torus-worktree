@@ -29,12 +29,24 @@ setup() {
   git -C "$BASE" add -A
   git -C "$BASE" commit -qm "initial"
 
+  # `open`/`up` fire a real `osascript` "worktree ready" dialog on a real
+  # Mac (see open_existing_worktree) — stub it out so tests never pop a
+  # real dialog on the developer's screen. Prepended to PATH so it shadows
+  # the real /usr/bin/osascript.
+  STUB_BIN="$(mktemp -d)"
+  cat > "$STUB_BIN/osascript" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$STUB_BIN/osascript"
+  export PATH="$STUB_BIN:$PATH"
+
   cd "$BASE"
 }
 
 teardown() {
   cd /
-  rm -rf "$TEST_ROOT" "$TEST_HOME"
+  rm -rf "$TEST_ROOT" "$TEST_HOME" "$STUB_BIN"
 }
 
 # make_worktree <name> — sibling worktree checked out on a same-named branch.

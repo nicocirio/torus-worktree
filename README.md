@@ -12,7 +12,8 @@ and MinIO instances.
 
 This doc covers what it is and how to install/use it. For *why* it's built
 the way it is — decisions, dead ends, bugs we hit — see
-[`docs/design-notes.md`](docs/design-notes.md).
+[`docs/design-notes.md`](docs/design-notes.md). For what changed between
+versions, see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem this solves
 
