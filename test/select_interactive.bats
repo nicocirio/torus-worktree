@@ -59,6 +59,13 @@ RUN_SELECT="$BATS_TEST_DIRNAME/support/run_select.exp"
   worktree_exists foo
 }
 
+@test "select: shows CREATED and LAST COMMIT columns, same as list" {
+  make_worktree foo
+  run "$RUN_SELECT" "$BASE" "$WT" "q"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NAME"*"BRANCH"*"CREATED"*"LAST COMMIT"* ]]
+}
+
 @test "select: an out-of-range number is ignored, not a crash" {
   make_worktree foo
   run "$RUN_SELECT" "$BASE" "$WT" "99" "d"
