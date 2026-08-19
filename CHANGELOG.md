@@ -33,7 +33,7 @@ not just *what*, see `docs/design-notes.md`.
 - Test coverage for `up` too, against stubbed `yarn`/`npm`/`mix`/`gleam`
   (`test/up.bats`, `test/support/toolchain_stubs.bash`) instead of the
   real oli-torus toolchain. Every subcommand now has at least some test
-  coverage.
+  coverage. (d3c507f)
 
 ### Fixed
 - `PLAYWRIGHT_BASE_URL` now uses `localhost` instead of `127.0.0.1`,
@@ -55,7 +55,7 @@ not just *what*, see `docs/design-notes.md`.
   message and leave the commands installed instead. (7398669)
 - `worktree up`'s "branch not found" prompt no longer silently aborts the
   whole command when there's no recorded default branch on `origin` (e.g.
-  no remote configured at all).
+  no remote configured at all). (a4a430f)
 
 ## [0.1.0] — 2026-08-11
 
