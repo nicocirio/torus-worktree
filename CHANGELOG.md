@@ -30,6 +30,10 @@ not just *what*, see `docs/design-notes.md`.
   `expect`), `list`, `rename`, `config`, `version`, `open`,
   `update`/`uninstall` (against a disposable fake install), and the
   `__complete-*` tab-completion data layer. (581f837, 7d4f598)
+- Test coverage for `up` too, against stubbed `yarn`/`npm`/`mix`/`gleam`
+  (`test/up.bats`, `test/support/toolchain_stubs.bash`) instead of the
+  real oli-torus toolchain. Every subcommand now has at least some test
+  coverage.
 
 ### Fixed
 - `PLAYWRIGHT_BASE_URL` now uses `localhost` instead of `127.0.0.1`,
@@ -49,6 +53,9 @@ not just *what*, see `docs/design-notes.md`.
 - `install.sh`'s PATH-setup and zsh-completion prompts no longer fail when
   there's no readable terminal to prompt on — they skip with a clear
   message and leave the commands installed instead. (7398669)
+- `worktree up`'s "branch not found" prompt no longer silently aborts the
+  whole command when there's no recorded default branch on `origin` (e.g.
+  no remote configured at all).
 
 ## [0.1.0] — 2026-08-11
 

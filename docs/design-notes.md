@@ -65,11 +65,16 @@ category as needing `git` to develop this repo at all. Coverage: `remove`
 data layer (`test/completion_data.bats` — the zsh widget itself, `_describe`
 et al., is not covered; see below), `list`, `rename`, `config`, `version`,
 `open` (`test/list.bats`, `test/rename.bats`, `test/config.bats`,
-`test/open.bats`), and `update`/`uninstall`
+`test/open.bats`), `update`/`uninstall`
 (`test/update_uninstall.bats`, against a disposable fake install — see
-below). `up` isn't covered yet; it needs stubbed `yarn`/`npm`/`mix`/`gleam`
-to test without the full oli-torus toolchain, which none of the above
-required.
+below), and `up` (`test/up.bats`, against stubbed
+`yarn`/`npm`/`mix`/`gleam` — `test/support/toolchain_stubs.bash` — instead
+of the real oli-torus toolchain: each stub just does the minimal thing
+`worktree.sh`'s own logic depends on seeing afterward, e.g. that
+`node_modules/` exists, and logs its invocation so a test can assert
+whether it actually ran; `MIX_STUB_FAIL`/etc. let a specific test make one
+stub fail, to exercise the "a job failed" reporting path). Every
+subcommand has at least some coverage now.
 
 Every test gets its own throwaway repo satisfying the oli-torus guard (fake
 `mix.exs`/`assets/automation/`/`gleam/gleam.toml`) and its own fake `$HOME`
@@ -79,7 +84,7 @@ same reasoning as the repo-identity guard in `worktree.sh` itself, applied to
 testing. The fake `$HOME` also gets a no-op `osascript` stub on `$PATH`,
 since `open`/`up`'s "worktree ready" dialog (see "macOS notification" below)
 would otherwise pop a real dialog on the developer's screen during every
-`open` test.
+`open`/`up` test.
 
 `remove --select` hard-requires a real terminal (`-t 0`/`-t 1`), which bats'
 plain `run` doesn't provide. `test/support/run_select.exp` drives it through
@@ -436,6 +441,25 @@ if you need it" in `--help` rather than half-implemented.
   before, restated because it recurred: an implicit/inherited exit status
   on an early return or a function's last statement is never safe when
   that status depends on data — make it explicit.
+- **Same failure mode again, this time in a plain `var="$(pipe)"`
+  assignment.** `up`'s "branch not found" path computed
+  `default_branch="$(git symbolic-ref ... refs/remotes/origin/HEAD | sed
+  ...)"` to suggest creating the branch from origin's default — when
+  there's no `origin/HEAD` ref (no remote configured at all, or one whose
+  default branch was never recorded), `symbolic-ref` exits 1, and under
+  `pipefail` that failure is the assignment statement's own exit status.
+  A bare `var=$(...)` assignment is not exempt from `set -e` just because
+  it's "only an assignment" — it killed `up` silently, before ever
+  showing the "not found, create it?" prompt, for any branch that doesn't
+  exist locally or on origin, whenever origin's default branch isn't on
+  record. Real oli-torus checkouts almost always have it (`git clone` sets
+  it during the clone), so this hid well in practice; a test repo with no
+  remote at all hits it immediately. Fixed with a trailing `|| true`. This
+  is the fourth bug this exact shape has produced — worth treating "does
+  this command's ordinary, expected 'nothing to report' case exit
+  non-zero, and is this statement exempt from set -e" as a standing
+  question for every new `var=$(...)` or pipe added to this script, not
+  just something to catch after the fact.
 
 ## Things we tried and reverted
 
