@@ -135,7 +135,13 @@ remove_managed_link() {
 
 remove_zsh_completion() {
   local zshrc="$HOME/.zshrc" tmp
-  [[ -f "$zshrc" ]] || return
+  # Explicit `return 0`, not a bare `return`: the latter reuses the exit
+  # status of `[[ -f "$zshrc" ]]` itself — 1 when there's no .zshrc — and
+  # this function is called as a plain statement in cmd_uninstall, so that
+  # 1 would kill the whole uninstall under set -e whenever $HOME has no
+  # .zshrc at all (same class of bug as the remove --select regression;
+  # see docs/design-notes.md's "Bugs we hit").
+  [[ -f "$zshrc" ]] || return 0
   tmp="$(mktemp "${zshrc}.torus-worktree.XXXXXX")"
 
   awk '
@@ -707,7 +713,11 @@ case "$SUBCOMMAND" in
   __complete-branches)
     {
       git -C "$BASE_ROOT" for-each-ref --format='%(refname:short)' refs/heads
-      git -C "$BASE_ROOT" for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v '^origin/HEAD$' | sed 's#^origin/##'
+      # `|| true`: with no `origin` remote (or no remote branches at all),
+      # grep -v sees zero input lines and exits 1 — under pipefail, that
+      # would kill the whole script even though "no remote branches" isn't
+      # an error here.
+      git -C "$BASE_ROOT" for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v '^origin/HEAD$' | sed 's#^origin/##' || true
     } | sort -u
     exit 0
     ;;
