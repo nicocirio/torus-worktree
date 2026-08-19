@@ -51,6 +51,26 @@ make_fake_install() {
   ln -sfn "$FAKE_TOOL_DIR/run-server.sh" "$HOME/.local/bin/run-server"
 }
 
+# make_bare_checkout — copies worktree.sh + lib/ into a fresh directory
+# with no .torus-worktree-install marker and no $HOME/.local/bin symlinks:
+# a plain checkout that was never run through install.sh, as opposed to
+# make_fake_install's fully "installed" copy. Used for uninstall's safety
+# guard test — the real dev checkout can't stand in for "never installed"
+# here, since install.sh supports installing in place from an existing
+# checkout (`INSTALL_DIR="$SCRIPT_DIR"` when run from inside one), so a
+# developer who installed that way genuinely has the marker sitting in
+# their working copy.
+make_bare_checkout() {
+  BARE_CHECKOUT_DIR="$(mktemp -d)/checkout"
+  mkdir -p "$BARE_CHECKOUT_DIR"
+  # Canonicalize for the same reason make_fake_install does: worktree.sh
+  # resolves its own TOOL_ROOT via `cd -P`.
+  BARE_CHECKOUT_DIR="$(cd "$BARE_CHECKOUT_DIR" && pwd -P)"
+  cp "$BATS_TEST_DIRNAME/../worktree.sh" "$BARE_CHECKOUT_DIR/"
+  cp -R "$BATS_TEST_DIRNAME/../lib" "$BARE_CHECKOUT_DIR/"
+  BARE_WT="$BARE_CHECKOUT_DIR/worktree.sh"
+}
+
 # push_a_new_commit_to_origin — clones $FAKE_ORIGIN separately, adds a
 # commit there, and pushes it — simulating "origin/main moved on" without
 # touching the fake install's own working copy or its git status.

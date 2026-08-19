@@ -55,6 +55,12 @@ not just *what*, see `docs/design-notes.md`.
 - `worktree up`'s "branch not found" prompt no longer silently aborts the
   whole command when there's no recorded default branch on `origin` (e.g.
   no remote configured at all).
+- The uninstall safety-guard test no longer runs against the real dev
+  checkout, which spuriously failed on any machine where `install.sh` was
+  run in place from that checkout (a supported mode — it leaves a
+  `.torus-worktree-install` marker right there). It now runs against a
+  disposable never-installed copy instead
+  (`test/support/fake_install.bash`'s `make_bare_checkout`).
 
 ## [0.1.0] — 2026-08-11
 

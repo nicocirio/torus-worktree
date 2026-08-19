@@ -8,14 +8,15 @@
 load test_helper
 load support/fake_install
 
-# --- uninstall's safety guard, against the REAL dev checkout ------------------
+# --- uninstall's safety guard -----------------------------------------------
 
 @test "uninstall: refuses on a checkout with no install marker (safety guard)" {
-  run "$WT" uninstall
+  make_bare_checkout
+  run "$BARE_WT" uninstall
   [ "$status" -eq 1 ]
   [[ "$output" == *"not marked as an installed copy"* ]]
-  # the real dev checkout must still be untouched
-  [ -f "$BATS_TEST_DIRNAME/../worktree.sh" ]
+  # the checkout must still be untouched
+  [ -f "$BARE_CHECKOUT_DIR/worktree.sh" ]
 }
 
 # --- update ---------------------------------------------------------------
