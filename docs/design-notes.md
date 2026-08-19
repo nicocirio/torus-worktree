@@ -239,6 +239,43 @@ function — sync the port into `oli.env`, print the `run-server` hint,
 notify, open the IDE — so behavior (and now notification wording) stays
 consistent regardless of which path got you there.
 
+### `remove --select` / `--all`: batch removal, no external picker
+
+Removing worktrees one at a time, each with its own "also delete the
+branch?" prompt, doesn't scale once you're juggling a dozen throwaway
+worktrees (e.g. one per exploratory branch). `remove` now accepts multiple
+names in one call, plus `--select` (an interactive numbered checkbox
+picker) and `--all` (every worktree except the current one) as alternative
+ways to build the same list of targets. All three funnel into one batch:
+remove everything, then ask about branch deletion **once** for the whole
+batch (or skip the question entirely via `--delete-branches`/
+`--keep-branches`), instead of once per worktree. `--force` does the same
+for the "contains modified or untracked files" retry — one bulk force
+instead of a retry prompt per dirty worktree.
+
+`--select` is deliberately implemented in plain bash — no `fzf` or other
+external dependency — consistent with the rest of the tool. It's a numbered
+list (toggle with `2`, `2 5 7`, or a range like `4-6`; `a`/`n`/`d`/`q`),
+redrawn via `clear` each time input is processed. Less slick than a real
+TUI, but it works everywhere bash 3.2 does (macOS's system bash) with zero
+setup. It hard-requires a real terminal (`-t 0`/`-t 1`) and errors out
+immediately with a pointer to `--all`/named args otherwise, rather than
+hanging on unreadable input.
+
+**Bug this surfaced**: a function whose *last* statement is a `for` loop
+ending in a bare `cond && action` returns whatever that loop's last
+iteration returned — and if `cond` is false on that last iteration (e.g.
+the final worktree in the list is left unchecked), the function's implicit
+return status is non-zero. Calling that function as a plain statement in
+the caller then kills the *entire script* under `set -e`, silently, with
+no error message — and only when the *last-listed* item happens to be
+unchecked, so casual testing (checking "the last one" almost by habit)
+can easily miss it. `select_worktrees_interactively` now ends with an
+explicit `return 0`. General lesson: never let a function's final
+statement be a bare `&&`/`||` list whose truth value depends on data —
+end on something deterministic (an explicit `return`, or at least another
+statement after the loop).
+
 ### Setup logs live in `~/.cache/`, not inside the worktree
 
 Originally `$WORKTREE_PATH/.worktree-setup/`. Moved out because a log dir

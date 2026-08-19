@@ -63,11 +63,22 @@ _worktree() {
       fi
       ;;
     remove)
-      if (( CURRENT == 3 )); then
-        local -a names
-        names=(${(f)"$(worktree __complete-worktrees 2>/dev/null)"})
-        _describe 'worktree' names
-      fi
+      # No CURRENT==3 gate, unlike `open`/`rename`: `remove` takes any
+      # number of worktree names plus options, in any order, so every
+      # position after the subcommand offers both.
+      local -a candidates raw
+      candidates=()
+      for raw in ${(f)"$(worktree __complete-worktrees 2>/dev/null)"}; do
+        candidates+=("${raw}:existing worktree")
+      done
+      candidates+=(
+        '--select:interactive checkbox picker'
+        '--all:target every worktree except the current one'
+        '--force:skip the dirty-worktree confirm, force-remove right away'
+        '--delete-branches:delete every removed worktree'\''s branch, no question'
+        '--keep-branches:never delete branches, no question'
+      )
+      _describe 'worktree or option' candidates
       ;;
     rename)
       if (( CURRENT == 3 )); then

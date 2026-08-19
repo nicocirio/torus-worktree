@@ -112,8 +112,19 @@ worktree list                         # see your worktrees (fast, no sizes)
 worktree list --size                  # same, with disk usage per worktree
 worktree rename MER-1234-some-branch a-more-descriptive-name  # rename the folder
 worktree remove MER-1234-some-branch  # clean one up when you're done
+worktree remove foo bar baz           # or several by name at once (tab-completes each one)
+worktree remove --select              # checkbox picker across all your worktrees, then remove
+worktree remove --all --delete-branches  # nuke every worktree but the current one, branches included
 run-server                            # from inside a worktree, start Phoenix on its assigned port
 ```
+
+`remove` also takes these flags, combinable with a name, several names, `--select`,
+or `--all`:
+- `--force` — skip the confirmation and force-remove any worktree with
+  uncommitted/untracked changes.
+- `--delete-branches` — delete every removed worktree's local branch, no prompt.
+- `--keep-branches` — never delete branches, no prompt.
+- (neither flag: asks once at the end, listing the branches that would go)
 
 Run `worktree --help` for the full picture — every flag, how `up` behaves
 when the branch or the worktree already exists, and the shell completion

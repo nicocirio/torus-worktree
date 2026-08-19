@@ -191,7 +191,7 @@ whichever you prefer.
 Usage:
   worktree up <branch> [name] [options]
   worktree open <name-or-branch> [--no-ide] [--no-server]
-  worktree remove <name>
+  worktree remove <name> [<name2> ...] | --select | --all [options]
   worktree rename <name> <new-name>
   worktree list [--size]
   worktree config
@@ -263,12 +263,38 @@ open:
                              here too.
 
 remove:
-  worktree remove <name>     <name> is either a sibling directory name (like
-                              the ones `up` creates) or a full path. Handles
-                              the "contains modified or untracked files" error
-                              by offering to retry with --force, and
-                              separately offers to delete the local branch
-                              (default no — that one's harder to undo).
+  worktree remove <name> [<name2> ...]
+                             Each <name> is either a sibling directory name
+                             (like the ones `up` creates) or a full path.
+                             Multiple names remove all of them in one run,
+                             with a single batch question at the end for
+                             branch deletion instead of one per worktree.
+  worktree remove --select   Interactive checkbox picker (no dependencies,
+                             e.g. no fzf, needed): lists every worktree
+                             except the current one, numbered. Toggle with
+                             '2', '2 5 7', or a range like '4-6' (space or
+                             comma separated); 'a' selects all, 'n' clears,
+                             'd' confirms, 'q' cancels. Requires a real
+                             terminal (not piped input).
+  worktree remove --all      Every worktree except the current one. Prints
+                             the full list and asks for one confirmation
+                             before removing anything.
+
+  Options (apply to all three forms above):
+    --force                  Skip the "contains modified or untracked
+                             files" retry question — force-remove any dirty
+                             worktree in the batch right away.
+    --delete-branches        Delete the local branch for every worktree
+                             actually removed (skips detached ones, which
+                             have none), no question asked.
+    --keep-branches          Never delete branches, no question asked.
+                             (Default without either flag: ask once, after
+                             removal, listing the branches that would go —
+                             harder to undo, so it's opt-in per run.)
+
+  Without --force, a worktree with modified or untracked files is left in
+  place and reported at the end; without --delete-branches/--keep-branches,
+  branch deletion is asked about once for the whole batch, not per worktree.
 
 rename:
   worktree rename <name> <new-name>
@@ -383,6 +409,119 @@ list_worktrees() {
     /^$/         { if (path != "") print path "\t" branch; path=""; branch="" }
     END          { if (path != "") print path "\t" branch }
   '
+}
+
+# select_worktrees_interactively — pure-bash checkbox picker for `remove
+# --select` (no external dependencies, e.g. fzf, on purpose — see
+# `worktree --help` / design-notes.md for why). Lists every worktree except
+# the current one, lets the user toggle by number/range, and leaves the
+# chosen paths in $SELECTED_TARGETS.
+select_worktrees_interactively() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "worktree remove --select needs an interactive terminal." >&2
+    echo "Use 'worktree remove <name>...' or 'worktree remove --all' instead." >&2
+    exit 1
+  fi
+
+  local -a paths=() branches=() names=() checked=()
+  while IFS=$'\t' read -r path branch; do
+    [[ "$path" == "$BASE_ROOT" ]] && continue
+    paths+=("$path")
+    branches+=("$branch")
+    names+=("$(basename "$path")")
+    checked+=("false")
+  done < <(list_worktrees)
+
+  if [[ ${#paths[@]} -eq 0 ]]; then
+    echo "No other worktrees to select from." >&2
+    exit 1
+  fi
+
+  local name_width=4 n
+  for n in "${names[@]}"; do
+    (( ${#n} > name_width )) && name_width=${#n}
+  done
+
+  local count="${#paths[@]}"
+  local input i idx start end token mark
+  while true; do
+    clear 2>/dev/null || true
+    echo "Select worktrees to remove (this worktree is never listed):"
+    echo
+    printf "     %-${name_width}s %s\n" "NAME" "BRANCH"
+    for i in "${!paths[@]}"; do
+      mark=" "
+      [[ "${checked[$i]}" == "true" ]] && mark="x"
+      printf "  %2d [%s] %-${name_width}s %s\n" "$((i + 1))" "$mark" "${names[$i]}" "${branches[$i]}"
+    done
+    echo
+    echo "Toggle by number: '2', '2 5 7', or '4-6' (comma or space separated)."
+    echo "'a' selects all, 'n' clears, 'd' confirms, 'q' cancels."
+    if ! read -r -p "> " input; then
+      echo
+      echo "No input — cancelled." >&2
+      exit 1
+    fi
+
+    input="${input//,/ }"
+
+    case "$input" in
+      d|D) break ;;
+      q|Q) echo "Cancelled."; exit 0 ;;
+      a|A) for i in "${!checked[@]}"; do checked[$i]="true"; done ;;
+      n|N) for i in "${!checked[@]}"; do checked[$i]="false"; done ;;
+      "") ;;
+      *)
+        for token in $input; do
+          if [[ "$token" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            start=$((10#${BASH_REMATCH[1]}))
+            end=$((10#${BASH_REMATCH[2]}))
+            for ((idx = start; idx <= end; idx++)); do
+              if (( idx >= 1 && idx <= count )); then
+                if [[ "${checked[$((idx - 1))]}" == "true" ]]; then
+                  checked[$((idx - 1))]="false"
+                else
+                  checked[$((idx - 1))]="true"
+                fi
+              fi
+            done
+          elif [[ "$token" =~ ^[0-9]+$ ]]; then
+            idx=$((10#$token))
+            if (( idx >= 1 && idx <= count )); then
+              if [[ "${checked[$((idx - 1))]}" == "true" ]]; then
+                checked[$((idx - 1))]="false"
+              else
+                checked[$((idx - 1))]="true"
+              fi
+            fi
+          else
+            echo "Ignoring unrecognized input: '$token'" >&2
+          fi
+        done
+        ;;
+    esac
+  done
+
+  SELECTED_TARGETS=()
+  for i in "${!paths[@]}"; do
+    [[ "${checked[$i]}" == "true" ]] && SELECTED_TARGETS+=("${paths[$i]}")
+  done
+  # Explicit, deterministic return: without it, this function's exit status
+  # is whatever the loop above happened to end on — e.g. false whenever the
+  # last-listed worktree is unchecked — which kills the whole script under
+  # `set -e` the moment the caller invokes this as a plain statement.
+  return 0
+}
+
+# is_in_array <needle> <haystack...> — true if needle is already present,
+# used by `remove` to dedupe targets that resolve to the same path.
+is_in_array() {
+  local needle="$1" x
+  shift
+  for x in "$@"; do
+    [[ "$x" == "$needle" ]] && return 0
+  done
+  return 1
 }
 
 # Shared by `open` and `up` (when it discovers the worktree it was about to
@@ -583,62 +722,217 @@ case "$SUBCOMMAND" in
     ;;
 
   remove)
-    name="${1:-}"
-    if [[ -z "$name" ]]; then
-      echo "Usage: worktree remove <name>" >&2
+    select_mode=false
+    all_mode=false
+    force_mode=false
+    branch_policy="ask" # ask | delete | keep
+    names=()
+
+    for arg in "$@"; do
+      case "$arg" in
+        --select) select_mode=true ;;
+        --all) all_mode=true ;;
+        --force) force_mode=true ;;
+        --delete-branches)
+          if [[ "$branch_policy" == "keep" ]]; then
+            echo "Can't combine --delete-branches with --keep-branches." >&2
+            exit 1
+          fi
+          branch_policy="delete"
+          ;;
+        --keep-branches)
+          if [[ "$branch_policy" == "delete" ]]; then
+            echo "Can't combine --delete-branches with --keep-branches." >&2
+            exit 1
+          fi
+          branch_policy="keep"
+          ;;
+        -*)
+          echo "Unknown option for remove: $arg" >&2
+          exit 1
+          ;;
+        *) names+=("$arg") ;;
+      esac
+    done
+
+    mode_count=0
+    $select_mode && mode_count=$((mode_count + 1))
+    $all_mode && mode_count=$((mode_count + 1))
+    [[ ${#names[@]} -gt 0 ]] && mode_count=$((mode_count + 1))
+
+    if [[ $mode_count -eq 0 ]]; then
+      echo "Usage: worktree remove <name> [<name2> ...] | --select | --all" >&2
+      exit 1
+    fi
+    if [[ $mode_count -gt 1 ]]; then
+      echo "Use one of: <name>... | --select | --all — not combined." >&2
       exit 1
     fi
 
-    if [[ -d "$name" ]]; then
-      remove_path="$(cd "$name" && pwd)"
+    # --- gather candidate paths, depending on the mode -------------------------
+
+    remove_targets=()
+
+    if $select_mode; then
+      select_worktrees_interactively
+      if [[ ${#SELECTED_TARGETS[@]} -eq 0 ]]; then
+        echo "Nothing selected."
+        exit 0
+      fi
+      remove_targets=("${SELECTED_TARGETS[@]}")
+    elif $all_mode; then
+      while IFS=$'\t' read -r path branch; do
+        [[ "$path" == "$BASE_ROOT" ]] && continue
+        remove_targets+=("$path")
+      done < <(list_worktrees)
+
+      if [[ ${#remove_targets[@]} -eq 0 ]]; then
+        echo "No other worktrees to remove."
+        exit 0
+      fi
+
+      echo "About to remove ${#remove_targets[@]} worktree(s):"
+      for p in "${remove_targets[@]}"; do
+        echo "  - $(basename "$p")"
+      done
+      read -r -p "Continue? [y/N] " all_confirm || true
+      if [[ ! "$all_confirm" =~ ^[Yy]$ ]]; then
+        echo "Cancelled."
+        exit 0
+      fi
     else
-      remove_path="$(dirname "$BASE_ROOT")/$name"
+      for name in "${names[@]}"; do
+        if [[ -d "$name" ]]; then
+          remove_targets+=("$(cd "$name" && pwd)")
+        else
+          remove_targets+=("$(dirname "$BASE_ROOT")/$name")
+        fi
+      done
     fi
 
-    if [[ "$remove_path" == "$BASE_ROOT" ]]; then
-      echo "That's the worktree you're running this from — not removing it." >&2
-      exit 1
-    fi
+    # --- validate + dedupe -------------------------------------------------
 
-    if [[ ! -e "$remove_path" ]]; then
-      echo "No worktree found at $remove_path." >&2
+    valid_targets=()
+    for p in "${remove_targets[@]}"; do
+      if [[ "$p" == "$BASE_ROOT" ]]; then
+        echo "Skipping $(basename "$p") — that's the worktree you're running this from." >&2
+        continue
+      fi
+      if [[ ! -e "$p" ]]; then
+        echo "Skipping $(basename "$p") — no worktree found at $p." >&2
+        continue
+      fi
+      if [[ ${#valid_targets[@]} -gt 0 ]] && is_in_array "$p" "${valid_targets[@]}"; then
+        continue
+      fi
+      valid_targets+=("$p")
+    done
+
+    if [[ ${#valid_targets[@]} -eq 0 ]]; then
+      echo "Nothing to remove." >&2
       echo "See your current worktrees: worktree list" >&2
       exit 1
     fi
 
-    remove_branch="$(list_worktrees | awk -F'\t' -v p="$remove_path" '$1==p{print $2}')"
+    # --- remove each target, deferring dirty-worktree confirmation to one
+    # batch question at the end instead of asking per worktree -------------
 
-    set +e
-    remove_output="$(git -C "$BASE_ROOT" worktree remove "$remove_path" 2>&1)"
-    remove_status=$?
-    set -e
+    removed_paths=()
+    removed_branches=()
+    dirty_paths=()
+    dirty_branches=()
+    failed_paths=()
 
-    if [[ $remove_status -ne 0 ]]; then
-      echo "$remove_output" >&2
-      if echo "$remove_output" | grep -q "contains modified or untracked files"; then
-        read -r -p "Retry with --force (discards uncommitted changes in that worktree)? [y/N] " force_choice || true
-        if [[ "$force_choice" =~ ^[Yy]$ ]]; then
-          git -C "$BASE_ROOT" worktree remove --force "$remove_path"
+    for p in "${valid_targets[@]}"; do
+      branch="$(list_worktrees | awk -F'\t' -v pp="$p" '$1==pp{print $2}')"
+
+      set +e
+      remove_output="$(git -C "$BASE_ROOT" worktree remove "$p" 2>&1)"
+      remove_status=$?
+      set -e
+
+      if [[ $remove_status -ne 0 ]] && echo "$remove_output" | grep -q "contains modified or untracked files"; then
+        if $force_mode; then
+          git -C "$BASE_ROOT" worktree remove --force "$p"
+          remove_status=0
         else
-          exit 1
+          dirty_paths+=("$p")
+          dirty_branches+=("$branch")
+          continue
         fi
-      else
-        exit 1
+      elif [[ $remove_status -ne 0 ]]; then
+        echo "$remove_output" >&2
+        failed_paths+=("$p")
+        continue
+      fi
+
+      echo "Removed worktree at $p."
+      # Setup logs live outside the worktree (see `up`) precisely so removing
+      # a dirty worktree doesn't need --force just because of them — but that
+      # also means they don't disappear on their own, so clean them up here.
+      rm -rf "$HOME/.cache/torus-worktree/logs/$(basename "$p")"
+      removed_paths+=("$p")
+      [[ -n "$branch" && "$branch" != "(detached)" ]] && removed_branches+=("$branch")
+    done
+
+    dirty_confirmed=false
+    if [[ ${#dirty_paths[@]} -gt 0 ]]; then
+      echo
+      echo "These have modified or untracked files:"
+      for p in "${dirty_paths[@]}"; do
+        echo "  - $(basename "$p")"
+      done
+      read -r -p "Force-remove them too (discards uncommitted changes)? [y/N] " dirty_confirm || true
+      if [[ "$dirty_confirm" =~ ^[Yy]$ ]]; then
+        dirty_confirmed=true
+        for i in "${!dirty_paths[@]}"; do
+          p="${dirty_paths[$i]}"
+          branch="${dirty_branches[$i]}"
+          git -C "$BASE_ROOT" worktree remove --force "$p"
+          echo "Removed worktree at $p (forced)."
+          rm -rf "$HOME/.cache/torus-worktree/logs/$(basename "$p")"
+          removed_paths+=("$p")
+          [[ -n "$branch" && "$branch" != "(detached)" ]] && removed_branches+=("$branch")
+        done
       fi
     fi
 
-    echo "Removed worktree at $remove_path."
+    if [[ ${#failed_paths[@]} -gt 0 ]]; then
+      echo
+      echo "Failed to remove:" >&2
+      for p in "${failed_paths[@]}"; do
+        echo "  - $(basename "$p")" >&2
+      done
+    fi
 
-    # Setup logs live outside the worktree (see `up`) precisely so removing
-    # a dirty worktree doesn't need --force just because of them — but that
-    # also means they don't disappear on their own, so clean them up here.
-    rm -rf "$HOME/.cache/torus-worktree/logs/$(basename "$remove_path")"
+    # --- branch cleanup, decided once for the whole batch ------------------
 
-    if [[ -n "$remove_branch" && "$remove_branch" != "(detached)" ]]; then
-      read -r -p "Also delete the local branch '$remove_branch'? [y/N] " delete_branch_choice || true
-      if [[ "$delete_branch_choice" =~ ^[Yy]$ ]]; then
-        git -C "$BASE_ROOT" branch -D "$remove_branch"
-      fi
+    if [[ ${#removed_branches[@]} -gt 0 ]]; then
+      case "$branch_policy" in
+        keep) ;;
+        delete)
+          for b in "${removed_branches[@]}"; do
+            git -C "$BASE_ROOT" branch -D "$b"
+          done
+          ;;
+        ask)
+          echo
+          echo "Also delete these local branches?"
+          for b in "${removed_branches[@]}"; do
+            echo "  - $b"
+          done
+          read -r -p "[y/N] " delete_branch_choice || true
+          if [[ "$delete_branch_choice" =~ ^[Yy]$ ]]; then
+            for b in "${removed_branches[@]}"; do
+              git -C "$BASE_ROOT" branch -D "$b"
+            done
+          fi
+          ;;
+      esac
+    fi
+
+    if [[ ${#failed_paths[@]} -gt 0 ]] || { [[ ${#dirty_paths[@]} -gt 0 ]] && ! $dirty_confirmed; }; then
+      exit 1
     fi
     exit 0
     ;;
