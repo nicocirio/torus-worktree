@@ -181,6 +181,21 @@ worktrees missing `HTTP_PORT`, it falls back to `PORT` and then to the port in
 `PLAYWRIGHT_BASE_URL`. Only after this reconciliation does it check whether
 the selected port is available and, if necessary, assign the next free port.
 
+### Why `PLAYWRIGHT_BASE_URL` uses `localhost`, not `127.0.0.1`
+
+`sync_worktree_port_env` (and `run-server`'s own exported copy of the
+variable) write `PLAYWRIGHT_BASE_URL` as `http://localhost:<port>` to match
+`HOST`, which `oli-torus` defaults to `localhost` (`config/dev.exs`,
+`oli.example.env`) and uses to build absolute URLs for OAuth/LTI/payment
+redirect flows. Phoenix session cookies are host-scoped with no explicit
+`domain`, so if the browser loads the app via one host string while a
+redirect sends it to an absolute URL built from a *different* host string,
+the browser treats it as a different origin and drops the session —
+`check_origin: false` in dev only stops Phoenix from rejecting the request
+server-side, it doesn't stop the browser from silently switching origins.
+Originally hardcoded to `127.0.0.1`, which happened to also mismatch
+`run-server`'s own "Starting Phoenix at http://localhost:$port" message.
+
 ### Why `run-server` isn't personal
 
 Originally the idea was a configurable `SERVER_CMD` (personal override,

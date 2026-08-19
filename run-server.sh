@@ -88,7 +88,7 @@ fi
 sync_worktree_port_env "oli.env" "$port"
 HTTP_PORT="$port"
 PORT="$port"
-PLAYWRIGHT_BASE_URL="http://127.0.0.1:$port"
+PLAYWRIGHT_BASE_URL="http://localhost:$port"
 
 echo "Starting Phoenix at http://localhost:$port"
 exec iex -S mix phx.server

@@ -21,7 +21,7 @@ sync_worktree_port_env() {
     /^HTTP_PORT=/ { print "HTTP_PORT=" port; saw_http = 1; next }
     /^PORT=/ { print "PORT=" port; saw_port = 1; next }
     /^PLAYWRIGHT_BASE_URL=/ {
-      print "PLAYWRIGHT_BASE_URL=http://127.0.0.1:" port
+      print "PLAYWRIGHT_BASE_URL=http://localhost:" port
       saw_playwright = 1
       next
     }
@@ -29,7 +29,7 @@ sync_worktree_port_env() {
     END {
       if (!saw_http) print "HTTP_PORT=" port
       if (!saw_port) print "PORT=" port
-      if (!saw_playwright) print "PLAYWRIGHT_BASE_URL=http://127.0.0.1:" port
+      if (!saw_playwright) print "PLAYWRIGHT_BASE_URL=http://localhost:" port
     }
   ' "$file" > "$tmp"
 
