@@ -16,46 +16,45 @@ not just *what*, see `docs/design-notes.md`.
   build a batch. All three ask about branch deletion and dirty-worktree
   force-removal once for the whole batch instead of once per worktree;
   `--force`, `--delete-branches`, and `--keep-branches` apply to all three
-  forms and skip those questions entirely for scripted use. (1f2a23c)
-- A `worktree help` subcommand (same as `-h`/`--help`). (db58dfd)
+  forms and skip those questions entirely for scripted use.
+- A `worktree help` subcommand (same as `-h`/`--help`).
 - `--help`/`-h` now complete at the top level too (`wt <Tab>` offers them
   alongside the subcommands), without breaking partial subcommand matching
   (`wt uni<Tab>` still filters to `uninstall`).
-  (3f12aea, 95697b3, f0bdb5d, b784cab)
 - zsh tab completion now also covers `version`, `update`, and `uninstall`
   (including `uninstall --purge-config`) — previously only `up`/`open`/
-  `remove`/`rename`/`list`/`config` completed. (2cd58a5)
+  `remove`/`rename`/`list`/`config` completed.
 - A `bats` test suite (`test/`, dev-only — see the README's "Testing"
   section), covering `remove` (including `--select` through a real pty via
   `expect`), `list`, `rename`, `config`, `version`, `open`,
   `update`/`uninstall` (against a disposable fake install), and the
-  `__complete-*` tab-completion data layer. (581f837, 7d4f598)
+  `__complete-*` tab-completion data layer.
 - Test coverage for `up` too, against stubbed `yarn`/`npm`/`mix`/`gleam`
   (`test/up.bats`, `test/support/toolchain_stubs.bash`) instead of the
   real oli-torus toolchain. Every subcommand now has at least some test
-  coverage. (d3c507f)
+  coverage.
 
 ### Fixed
 - `PLAYWRIGHT_BASE_URL` now uses `localhost` instead of `127.0.0.1`,
   matching `HOST` — the mismatch could silently drop the browser session
-  on OAuth/LTI/payment redirect flows. (343e839)
+  on OAuth/LTI/payment redirect flows.
 - `__complete-branches` no longer silently crashes tab completion on a
-  repo with no `origin` remote configured. (97b4bff)
+  repo with no `origin` remote configured.
 - `worktree uninstall` no longer aborts partway (before removing anything)
-  when `$HOME` has no `.zshrc`. (97b4bff)
+  when `$HOME` has no `.zshrc`.
 - `remove --select` no longer silently dies with no error message when the
-  last-listed worktree is left unchecked (a `set -e` edge case). (1f2a23c)
+  last-listed worktree is left unchecked (a `set -e` edge case).
 - The README's install command now points at `main` (with a cache-busting
   query string) instead of the frozen `v0.1.0` tag, so a fresh install
-  actually gets the latest code. (c9edf2a)
+  actually gets the latest code.
 - `install.sh` re-execs the freshly cloned installer via `bash` explicitly,
-  instead of relying on it already being executable. (ddd1070)
+  instead of relying on it already being executable.
 - `install.sh`'s PATH-setup and zsh-completion prompts no longer fail when
   there's no readable terminal to prompt on — they skip with a clear
-  message and leave the commands installed instead. (7398669)
+  message and leave the commands installed instead.
 - `worktree up`'s "branch not found" prompt no longer silently aborts the
   whole command when there's no recorded default branch on `origin` (e.g.
-  no remote configured at all). (a4a430f)
+  no remote configured at all).
 
 ## [0.1.0] — 2026-08-11
 

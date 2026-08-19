@@ -10,10 +10,10 @@ without being asked each time:
 - **Run the suite before considering work done** (and before pushing):
   `bats test/`.
 - **CHANGELOG.md**: user-facing changes get an entry under `[Unreleased]`
-  (`### Added`/`### Fixed`/etc., Keep a Changelog format). Add the commit
-  hash to the entry in a small follow-up edit after the real commit lands —
-  that's the existing pattern (see recent log entries), not a hash guessed
-  in advance.
+  (`### Added`/`### Fixed`/etc., Keep a Changelog format), in the *same*
+  commit as the change itself. No trailing commit hash in the entry — that
+  used to require a second follow-up commit just to record it, wasn't worth
+  it, and existing entries were cleaned up to match.
 - **docs/design-notes.md** is where the *why* behind non-obvious decisions
   lives (platform quirks, rejected alternatives). Check it before assuming
   something is an oversight, and add to it when a decision needs that kind
