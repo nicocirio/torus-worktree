@@ -314,8 +314,14 @@ rename:
                              the directory.
 
 list:
-  worktree list               Fast — just the path/branch of each worktree,
-                               no disk usage. Doesn't shell out to `du`.
+  worktree list               Fast — path/branch/created/last-commit for
+                               each worktree, no disk usage. Doesn't shell
+                               out to `du`. CREATED is the worktree
+                               directory's birth time; LAST COMMIT is the
+                               latest commit's date, shown only if it's
+                               after the worktree was created (otherwise
+                               "—") so history from before the worktree
+                               existed doesn't look like recent activity.
   worktree list --size        Also shows disk usage per worktree (`du -sh`,
                                run in parallel across all of them so the wait
                                is bounded by the single biggest one, not the
@@ -415,6 +421,45 @@ list_worktrees() {
     /^$/         { if (path != "") print path "\t" branch; path=""; branch="" }
     END          { if (path != "") print path "\t" branch }
   '
+}
+
+# relative_time — "3 minutes ago"/"2 days ago"-style rendering of a unix
+# epoch, git-log flavored but hand-rolled since it's also used for directory
+# birth time (not something git can format for us).
+relative_time() {
+  local epoch="$1" now diff unit count
+  now="$(date +%s)"
+  diff=$(( now - epoch ))
+  (( diff < 0 )) && diff=0
+  if (( diff < 60 )); then echo "just now"; return; fi
+  if (( diff < 3600 )); then unit=minute; count=$(( diff / 60 ))
+  elif (( diff < 86400 )); then unit=hour; count=$(( diff / 3600 ))
+  elif (( diff < 604800 )); then unit=day; count=$(( diff / 86400 ))
+  elif (( diff < 2592000 )); then unit=week; count=$(( diff / 604800 ))
+  elif (( diff < 31536000 )); then unit=month; count=$(( diff / 2592000 ))
+  else unit=year; count=$(( diff / 31536000 ))
+  fi
+  (( count != 1 )) && unit="${unit}s"
+  echo "$count $unit ago"
+}
+
+# worktree_dates — prints "<created-relative>\t<last-commit-relative>" for a
+# worktree path. The commit half is left blank unless it's at-or-after the
+# worktree's own creation (>=, not >: a commit made in the same wall-clock
+# second as `git worktree add` must still count): otherwise, for a worktree
+# checked out onto a branch with old history, `git log -1` would surface
+# that old work as if it happened in this worktree, which it didn't.
+worktree_dates() {
+  local path="$1" created_epoch commit_epoch
+  created_epoch="$(stat -f %B "$path" 2>/dev/null)"
+  # Birth time is 0 on filesystems that don't track it; fall back to mtime.
+  [[ -z "$created_epoch" || "$created_epoch" == "0" ]] && created_epoch="$(stat -f %m "$path" 2>/dev/null)"
+  commit_epoch="$(git -C "$path" log -1 --format=%ct 2>/dev/null)"
+  local commit_rel=""
+  if [[ -n "$commit_epoch" ]] && (( commit_epoch >= created_epoch )); then
+    commit_rel="$(relative_time "$commit_epoch")"
+  fi
+  printf '%s\t%s\n' "$(relative_time "$created_epoch")" "$commit_rel"
 }
 
 # select_worktrees_interactively — pure-bash checkbox picker for `remove
@@ -650,19 +695,26 @@ case "$SUBCOMMAND" in
 
     if ! $show_size; then
       rows=()
-      NAME_HEADER="NAME"
+      NAME_HEADER="NAME"; BRANCH_HEADER="BRANCH"; CREATED_HEADER="CREATED"
       name_width=${#NAME_HEADER}
+      branch_width=${#BRANCH_HEADER}
+      created_width=${#CREATED_HEADER}
       while IFS=$'\t' read -r path branch; do
         name="$(basename "$path")"
         marker=""
         [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
+        branch_col="$branch$marker"
+        IFS=$'\t' read -r created last_commit < <(worktree_dates "$path")
+        [[ -z "$last_commit" ]] && last_commit="—"
         (( ${#name} > name_width )) && name_width=${#name}
-        rows+=("$name"$'\t'"$branch$marker")
+        (( ${#branch_col} > branch_width )) && branch_width=${#branch_col}
+        (( ${#created} > created_width )) && created_width=${#created}
+        rows+=("$name"$'\t'"$branch_col"$'\t'"$created"$'\t'"$last_commit")
       done < <(list_worktrees)
-      printf "%-${name_width}s %s\n" "$NAME_HEADER" "BRANCH"
+      printf "%-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$NAME_HEADER" "$BRANCH_HEADER" "$CREATED_HEADER" "LAST COMMIT"
       for row in "${rows[@]}"; do
-        IFS=$'\t' read -r name rest <<< "$row"
-        printf "%-${name_width}s %s\n" "$name" "$rest"
+        IFS=$'\t' read -r name branch_col created last_commit <<< "$row"
+        printf "%-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$name" "$branch_col" "$created" "$last_commit"
       done
       exit 0
     fi
@@ -673,28 +725,38 @@ case "$SUBCOMMAND" in
     while IFS=$'\t' read -r path branch; do
       i=$((i + 1))
       idx="$(printf "%03d" "$i")"
-      printf '%s\t%s\n' "$path" "$branch" > "$tmp_dir/$idx.meta"
+      IFS=$'\t' read -r created last_commit < <(worktree_dates "$path")
+      printf '%s\t%s\t%s\t%s\n' "$path" "$branch" "$created" "$last_commit" > "$tmp_dir/$idx.meta"
       ( du -sh "$path" 2>/dev/null | cut -f1 > "$tmp_dir/$idx.size" ) &
     done < <(list_worktrees)
     wait
 
-    # Two passes: first measure the widest name so columns line up whatever
-    # `rename` (or the ticket-based default) produced, then print.
-    NAME_HEADER="NAME"
+    # Two passes: first measure the widest name/branch/created so columns
+    # line up whatever `rename` (or the ticket-based default) produced, then
+    # print.
+    NAME_HEADER="NAME"; BRANCH_HEADER="BRANCH"; CREATED_HEADER="CREATED"
     name_width=${#NAME_HEADER}
+    branch_width=${#BRANCH_HEADER}
+    created_width=${#CREATED_HEADER}
     for meta in "$tmp_dir"/*.meta; do
-      IFS=$'\t' read -r path branch < "$meta"
+      IFS=$'\t' read -r path branch created last_commit < "$meta"
       name="$(basename "$path")"
+      marker=""
+      [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
+      branch_col="$branch$marker"
       (( ${#name} > name_width )) && name_width=${#name}
+      (( ${#branch_col} > branch_width )) && branch_width=${#branch_col}
+      (( ${#created} > created_width )) && created_width=${#created}
     done
 
-    printf "%-8s %-${name_width}s %s\n" "SIZE" "$NAME_HEADER" "BRANCH"
+    printf "%-8s %-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "SIZE" "$NAME_HEADER" "$BRANCH_HEADER" "$CREATED_HEADER" "LAST COMMIT"
     for meta in "$tmp_dir"/*.meta; do
-      IFS=$'\t' read -r path branch < "$meta"
+      IFS=$'\t' read -r path branch created last_commit < "$meta"
       size="$(cat "${meta%.meta}.size" 2>/dev/null)"
       marker=""
       [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
-      printf "%-8s %-${name_width}s %s%s\n" "$size" "$(basename "$path")" "$branch" "$marker"
+      [[ -z "$last_commit" ]] && last_commit="—"
+      printf "%-8s %-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$size" "$(basename "$path")" "$branch$marker" "$created" "$last_commit"
     done
     rm -rf "$tmp_dir"
     exit 0

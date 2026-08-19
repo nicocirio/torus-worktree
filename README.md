@@ -109,7 +109,7 @@ worktree config                       # optionally set your IDE command and pref
 worktree help                         # show the command reference
 worktree up MER-1234-some-branch      # create a worktree, set it up, open your IDE
 worktree open a-more-descriptive-name # jump straight to one you already have (by folder name or branch)
-worktree list                         # see your worktrees (fast, no sizes)
+worktree list                         # see your worktrees, with created/last-commit dates (fast, no sizes)
 worktree list --size                  # same, with disk usage per worktree
 worktree rename MER-1234-some-branch a-more-descriptive-name  # rename the folder
 worktree remove MER-1234-some-branch  # clean one up when you're done
