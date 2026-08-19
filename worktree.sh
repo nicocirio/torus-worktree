@@ -434,10 +434,7 @@ relative_time() {
   if (( diff < 60 )); then echo "just now"; return; fi
   if (( diff < 3600 )); then unit=minute; count=$(( diff / 60 ))
   elif (( diff < 86400 )); then unit=hour; count=$(( diff / 3600 ))
-  elif (( diff < 604800 )); then unit=day; count=$(( diff / 86400 ))
-  elif (( diff < 2592000 )); then unit=week; count=$(( diff / 604800 ))
-  elif (( diff < 31536000 )); then unit=month; count=$(( diff / 2592000 ))
-  else unit=year; count=$(( diff / 31536000 ))
+  else unit=day; count=$(( diff / 86400 ))
   fi
   (( count != 1 )) && unit="${unit}s"
   echo "$count $unit ago"
@@ -474,13 +471,18 @@ select_worktrees_interactively() {
     exit 1
   fi
 
-  local -a paths=() branches=() names=() checked=()
+  local -a paths=() branches=() names=() checked=() createds=() last_commits=()
   while IFS=$'\t' read -r path branch; do
     [[ "$path" == "$BASE_ROOT" ]] && continue
     paths+=("$path")
     branches+=("$branch")
     names+=("$(basename "$path")")
     checked+=("false")
+    local created last_commit
+    IFS=$'\t' read -r created last_commit < <(worktree_dates "$path")
+    [[ -z "$last_commit" ]] && last_commit="—"
+    createds+=("$created")
+    last_commits+=("$last_commit")
   done < <(list_worktrees)
 
   if [[ ${#paths[@]} -eq 0 ]]; then
@@ -488,9 +490,15 @@ select_worktrees_interactively() {
     exit 1
   fi
 
-  local name_width=4 n
+  local name_width=4 branch_width=6 created_width=7 n
   for n in "${names[@]}"; do
     (( ${#n} > name_width )) && name_width=${#n}
+  done
+  for n in "${branches[@]}"; do
+    (( ${#n} > branch_width )) && branch_width=${#n}
+  done
+  for n in "${createds[@]}"; do
+    (( ${#n} > created_width )) && created_width=${#n}
   done
 
   local count="${#paths[@]}"
@@ -499,11 +507,11 @@ select_worktrees_interactively() {
     clear 2>/dev/null || true
     echo "Select worktrees to remove (this worktree is never listed):"
     echo
-    printf "     %-${name_width}s %s\n" "NAME" "BRANCH"
+    printf "     %-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "NAME" "BRANCH" "CREATED" "LAST COMMIT"
     for i in "${!paths[@]}"; do
       mark=" "
       [[ "${checked[$i]}" == "true" ]] && mark="x"
-      printf "  %2d [%s] %-${name_width}s %s\n" "$((i + 1))" "$mark" "${names[$i]}" "${branches[$i]}"
+      printf "  %2d [%s] %-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$((i + 1))" "$mark" "${names[$i]}" "${branches[$i]}" "${createds[$i]}" "${last_commits[$i]}"
     done
     echo
     echo "Toggle by number: '2', '2 5 7', or '4-6' (comma or space separated)."

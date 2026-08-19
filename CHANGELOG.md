@@ -10,14 +10,17 @@ not just *what*, see `docs/design-notes.md`.
 ## [Unreleased]
 
 ### Added
-- `worktree list` (with or without `--size`) now shows CREATED and LAST
-  COMMIT columns for every worktree. CREATED is the worktree directory's
-  birth time; LAST COMMIT is the latest commit's date, but only shown when
-  it's at-or-after the worktree's own creation — otherwise it's a branch
-  with older history checked out into a fresh worktree, and showing that
-  commit would misread as recent activity in this worktree. Both are cheap
+- `worktree list` (with or without `--size`) and the `remove --select`
+  picker now show CREATED and LAST COMMIT columns for every worktree.
+  CREATED is the worktree directory's birth time; LAST COMMIT is the
+  latest commit's date, but only shown when it's at-or-after the
+  worktree's own creation — otherwise it's a branch with older history
+  checked out into a fresh worktree, and showing that commit would
+  misread as recent activity in this worktree. Both are cheap
   (`stat`/`git log -1`, no `du`), so they're on unconditionally, no new
-  flag.
+  flag. Relative times only ever show minutes, hours, or days (e.g.
+  "810 days ago") — no rounding up to weeks/months/years, which would
+  have hidden how far apart two "1 week ago" entries could actually be.
 - `worktree remove` accepts multiple names in one call, plus `--select`
   (a pure-bash interactive checkbox picker — no external dependency) and
   `--all` (every worktree but the current one) as alternative ways to
