@@ -1,0 +1,29 @@
+#!/usr/bin/env expect
+#
+# Drives `worktree remove --select` through a pty, since it hard-requires a
+# real terminal (`-t 0`/`-t 1`) and bats itself has no tty to give it.
+#
+# Usage: run_select.exp <cwd> <worktree_script> <input1> [<input2> ...]
+# Sends each input, in order, at whichever prompt (the picker's "> " or a
+# "[y/N] " confirmation) appears next. The caller must supply exactly as
+# many inputs as prompts the scenario will actually produce.
+
+set timeout 10
+set cwd [lindex $argv 0]
+set wt [lindex $argv 1]
+set inputs [lrange $argv 2 end]
+
+cd $cwd
+spawn $wt remove --select
+
+foreach in $inputs {
+  expect {
+    -re {> $}       { send -- "$in\r" }
+    -re {\[y/N\] $} { send -- "$in\r" }
+    timeout         { puts "TIMEOUT waiting for a prompt before sending '$in'"; exit 99 }
+  }
+}
+
+expect eof
+catch wait result
+exit [lindex $result 3]

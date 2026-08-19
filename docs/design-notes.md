@@ -23,6 +23,8 @@ toolchain (yarn, npm, mix, gleam):
   scoped out — see "Shell completion" below).
 - `install.sh` — clones a managed installation when run via curl, or wires up
   symlinks when run from an existing checkout.
+- `test/` — the bats test suite (dev-only, see "Testing" below). Not part of
+  what gets installed or run by end users.
 
 `~/.local/bin/worktree`, `~/.local/bin/wt`, and `~/.local/bin/run-server`
 are symlinks into this folder, not copies and not shell functions. See "Why
@@ -51,6 +53,33 @@ This avoids a separate version file that could drift from the code. `uninstall`
 removes only symlinks that still point at the managed copy, then removes that
 copy after confirmation; personal config survives unless `--purge-config` is
 requested.
+
+## Testing
+
+`bats-core` (`brew install bats-core`), not a hand-rolled harness — it's the
+standard for testing shell CLIs specifically (setup/teardown per test,
+`run`/`$status`/`$output` assertions), and it's a dev-only dependency: never
+installed or required to actually use `worktree`/`wt`/`run-server`, same
+category as needing `git` to develop this repo at all. Coverage started with
+`remove` (the newest, highest-risk surface — see `test/remove.bats` and
+`test/select_interactive.bats`); other subcommands aren't covered yet.
+
+Every test gets its own throwaway repo satisfying the oli-torus guard (fake
+`mix.exs`/`assets/automation/`/`gleam/gleam.toml`) and its own fake `$HOME`
+(`test/test_helper.bash`), so the suite can't read or write the developer's
+real `~/.config/torus-worktree`, `~/.cache/torus-worktree`, or worktrees —
+same reasoning as the repo-identity guard in `worktree.sh` itself, applied to
+testing.
+
+`remove --select` hard-requires a real terminal (`-t 0`/`-t 1`), which bats'
+plain `run` doesn't provide. `test/support/run_select.exp` drives it through
+an actual pty via `expect`, sending each queued input at whichever prompt
+(the picker's `> ` or a trailing `[y/N] ` confirmation) appears next — this
+is also how the `set -e`/bare-`&&`-as-last-statement regression (see "Bugs
+we hit" below) got a permanent regression test
+(`select: toggling the LAST-listed item...`), since that bug only reproduced
+through a real interactive run, never through static analysis or a
+non-interactive one-shot command.
 
 ## Key decisions and why
 
@@ -262,19 +291,9 @@ setup. It hard-requires a real terminal (`-t 0`/`-t 1`) and errors out
 immediately with a pointer to `--all`/named args otherwise, rather than
 hanging on unreadable input.
 
-**Bug this surfaced**: a function whose *last* statement is a `for` loop
-ending in a bare `cond && action` returns whatever that loop's last
-iteration returned — and if `cond` is false on that last iteration (e.g.
-the final worktree in the list is left unchecked), the function's implicit
-return status is non-zero. Calling that function as a plain statement in
-the caller then kills the *entire script* under `set -e`, silently, with
-no error message — and only when the *last-listed* item happens to be
-unchecked, so casual testing (checking "the last one" almost by habit)
-can easily miss it. `select_worktrees_interactively` now ends with an
-explicit `return 0`. General lesson: never let a function's final
-statement be a bare `&&`/`||` list whose truth value depends on data —
-end on something deterministic (an explicit `return`, or at least another
-statement after the loop).
+**Bug this surfaced**: a `set -e`/bare-`&&`-as-last-statement interaction
+that silently killed the whole script whenever the last-listed worktree was
+left unchecked — see "Bugs we hit" below for the full writeup.
 
 ### Setup logs live in `~/.cache/`, not inside the worktree
 
@@ -344,6 +363,24 @@ if you need it" in `--help` rather than half-implemented.
   _worktree` to check what's actually loaded, then a small test function
   printing the array before calling `_describe`) before assuming the
   zstyle config is the culprit.
+- **A function ending on a bare `for ... && action` returns whatever that
+  loop's last iteration returned.** `select_worktrees_interactively`'s final
+  loop built `$SELECTED_TARGETS` with `[[ checked ]] && SELECTED_TARGETS+=(...)`
+  and nothing after it — whenever the *last-listed* worktree was left
+  unchecked, that final `&&` evaluated false, the function's implicit return
+  status was non-zero, and calling it as a plain statement in the caller
+  killed the entire script under `set -e`, silently, with no error message.
+  Only reproduced with a real interactive run (see "Testing" above); a
+  non-interactive one-shot test never exercises this loop at all. Fixed with
+  an explicit `return 0` at the end of the function. General lesson: never
+  let a function's final statement be a bare `&&`/`||` list whose truth
+  value depends on data — end on something deterministic.
+- **`mktemp -d` on macOS returns an unresolved path.** `/var/folders/...`
+  is a symlink to `/private/var/folders/...`; `git worktree list` reports
+  the resolved form, so a test helper comparing raw `mktemp -d` output
+  against git's output silently never matched (every "worktree still
+  exists" assertion failed, even when it did). Fixed by resolving with
+  `cd "$dir" && pwd -P` immediately after creating it.
 
 ## Things we tried and reverted
 

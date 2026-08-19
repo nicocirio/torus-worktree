@@ -143,6 +143,21 @@ worktree uninstall --purge-config  # also remove ~/.config/torus-worktree
 are identified with Git tags; until a tag exists, `version` shows the exact
 commit.
 
+## Testing
+
+```bash
+brew install bats-core   # test runner (dev-only — never needed to use the tool)
+bats test/                # runs everything under test/
+```
+
+Every test creates its own throwaway git repo (satisfying the oli-torus
+guard with fake `mix.exs`/`assets/automation/`/`gleam/gleam.toml`) and its
+own fake `$HOME`, so the suite never touches your real worktrees,
+`~/.config/torus-worktree`, or `~/.cache/torus-worktree`. The interactive
+`remove --select` picker needs a real terminal, so its tests drive it
+through a pty via `expect` (`test/support/run_select.exp`) instead of
+plain `bats run`.
+
 ## Future ideas
 
 - **Avoid the first `mix compile` entirely.** Keep investigating whether
