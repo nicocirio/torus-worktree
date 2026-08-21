@@ -10,6 +10,18 @@ not just *what*, see `docs/design-notes.md`.
 ## [Unreleased]
 
 ### Added
+- `worktree up` now primes `_build` for Oli's Elixir 1.19.x toolchain. It
+  patches Mix's copied manifest cwd and preserves mtimes of unchanged compile
+  inputs, avoiding the otherwise unnecessary full Elixir rebuild in a fresh
+  worktree while leaving Mix to detect genuine source/config/dependency
+  changes.
+- `worktree up --assets-deps=link` can share `assets/node_modules` with the
+  base worktree by symlink when both `yarn.lock` and `package.json` match.
+  It warns prominently about the reduced isolation and falls back to an
+  isolated `yarn install` when sharing is unsafe.
+- `worktree up` ends with a wall-clock timing report for its sequential and
+  parallel stages, plus a detailed start/end timeline in each worktree's log
+  directory.
 - `worktree list` (with or without `--size`) and the `remove --select`
   picker now show CREATED and LAST COMMIT columns for every worktree.
   CREATED is the worktree directory's birth time; LAST COMMIT is the

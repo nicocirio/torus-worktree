@@ -68,13 +68,18 @@ et al., is not covered; see below), `list`, `rename`, `config`, `version`,
 `test/open.bats`), `update`/`uninstall`
 (`test/update_uninstall.bats`, against a disposable fake install — see
 below), and `up` (`test/up.bats`, against stubbed
-`yarn`/`npm`/`mix`/`gleam` — `test/support/toolchain_stubs.bash` — instead
+`yarn`/`npm`/`mix`/`gleam`/`elixir` — `test/support/toolchain_stubs.bash` — instead
 of the real oli-torus toolchain: each stub just does the minimal thing
 `worktree.sh`'s own logic depends on seeing afterward, e.g. that
 `node_modules/` exists, and logs its invocation so a test can assert
 whether it actually ran; `MIX_STUB_FAIL`/etc. let a specific test make one
 stub fail, to exercise the "a job failed" reporting path). Every
 subcommand has at least some coverage now.
+
+The narrow binary-manifest rewrite has its own `test/patch_mix_manifest_cwd.bats`.
+Unlike the orchestration tests, it uses the pinned Erlang/Elixir 1.19.2
+toolchain to create and inspect a real Erlang term, covering both the exact
+cwd-only rewrite and rejection of malformed input without overwriting it.
 
 Every test gets its own throwaway repo satisfying the oli-torus guard (fake
 `mix.exs`/`assets/automation/`/`gleam/gleam.toml`) and its own fake `$HOME`
@@ -170,39 +175,63 @@ had already followed to the new path after the move. Not verified: how a
 real IDE with open file editors reacts (editor-dependent, no way to test
 headlessly here).
 
-### `node_modules`/`deps`: copy vs install
+### `node_modules`/`deps`: copy vs install, or explicitly share assets
 
 `auto` mode (default) compares the relevant lockfile (`yarn.lock`,
 `package-lock.json`, `mix.lock`) byte-for-byte between the base worktree and
-the new one. Identical → copy (near-instant via `cp -c` clonefile on APFS,
-falling back to `cp -al` hardlinks, falling back to a plain copy).
+the new one. Identical → copy (using `cp -c` clonefile on APFS when
+available, falling back to `cp -al` hardlinks, then a plain copy).
 Different or missing → install for real. This is safe specifically because
 lockfile identity is a real correctness signal for these — unlike `_build`
-(next section), where there's no equivalent "is this cache still valid"
-check we can do cheaply.
+(below), where cache reuse also depends on compiler inputs and their mtimes.
 
-### Why `_build` is NOT cached (but `gleam/build` is)
+`--assets-deps=link` is a deliberate opt-in exception for the particularly
+large `assets/node_modules` tree. It links the base directory instead of
+copying it only when both `assets/yarn.lock` **and** `assets/package.json`
+match byte-for-byte. The package manifest is included because it can change
+the dependency layout without a lockfile edit. The command warns before
+creating the worktree that the linked directory is shared and must not be
+modified there. If either file differs (or the base directory is absent), it
+prints a second prominent warning and runs an isolated `yarn install`.
 
-Tried hard to avoid the first `mix compile` being a full compile on every
-new worktree:
+### `_build` caching on Elixir 1.19
 
-1. Copy `_build` as-is → full recompile anyway (Mix's manifest tracks
-   source mtimes; `git worktree add` stamps checkout time on every file,
-   always newer than whatever the manifest recorded).
-2. Copy `_build` + restore source mtimes to match the base → still a full
-   recompile. Ruled out the mtime theory.
-3. Elixir 1.19.2's `elixirc_options: [check_cwd: false]` (per
-   [this post](https://ryanzidago.com/posts/reducing-elixir-worktree-setup-time-by-83-percent/),
-   which documents Mix embedding the absolute project path in the compile
-   manifest) → still a full recompile. The post itself warns this only
-   fully worked for a plain Phoenix app in their tests; this project
-   apparently has another source of manifest invalidation beyond cwd
-   (suspect: `Oli.Cldr`'s compile-time locale generation, unconfirmed).
+Oli Torus currently pins Elixir 1.19.2. Mix 1.19's `compile.elixir` manifest
+(version 29) stores the absolute project cwd. A copied `_build` therefore
+looks stale as soon as a new worktree has a different path, even when its
+source and dependency inputs are otherwise reusable.
 
-Conclusion: not worth chasing further for now (noted as a "Future idea" in
-the README). `gleam/build`, by contrast, *does* benefit from being copied
-first — gleam's own incremental compiler doesn't hit whatever invalidates
-Mix's, confirmed by build times dropping from ~2-3s to ~0.1-0.2s.
+`lib/patch_mix_manifest_cwd.exs` reads only that known manifest shape and
+rewrites its cwd field to the new worktree path. It writes a temporary file
+then renames it over the copied manifest. If the Elixir version is not 1.19.x,
+the manifest is missing, or its shape is unexpected, priming safely falls
+back to ordinary `mix compile` validation rather than guessing at another
+Mix version's cache format.
+
+There is a second cause of false invalidation: `git worktree add` gives the
+new checkout fresh mtimes. Mix uses `mix.exs` and `config/*.exs` mtimes when
+evaluating compile configuration, and Oli's development configuration has
+dynamic inputs. After checkout, the tool restores those mtimes only when a
+target file is byte-for-byte identical to the base file. A real branch
+change is deliberately left untouched, so Mix still detects it. Finally,
+`mix compile` always runs; the compiler, not this tool, decides whether the
+reused build is valid and which genuine source/config/dependency changes need
+recompilation.
+
+This made a matching warm Oli worktree avoid the prior 1,783-file rebuild;
+subsequent `mix compile` was a no-op. `gleam/build` remains independently
+primed before its always-run incremental build.
+
+### Setup timing report
+
+The final timing report uses wall-clock time, not a sum of its parallel jobs.
+It shows preparation, the sequential Mix dependency step, the duration of
+the parallel section, and the job that formed its critical path. Individual
+job times explain where the wall-clock time went but must not be added
+together. `timings.log` records each stage's start and end offsets for more
+precise inspection after a run. This made it clear that a perceived pause
+after Mix printed `Generated oli app` could be the still-running assets copy,
+not the compiler.
 
 ### Job ordering: deps sync can't run parallel with `assets`
 
@@ -491,4 +520,4 @@ if you need it" in `--help` rather than half-implemented.
   and fix it. The rest of the environment (deps, the worktree itself) is
   still valid at that point.
 - See the README's "Future ideas" section for larger-scope items
-  (`_build` caching, per-worktree DB, `worktree refresh`).
+  (per-worktree DB, `worktree refresh`).

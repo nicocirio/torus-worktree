@@ -217,13 +217,16 @@ up:
                              name.
 
   Options:
-    --assets-deps=MODE       auto (default) | copy | install
+    --assets-deps=MODE       auto (default) | copy | install | link
     --automation-deps=MODE   auto (default) | copy | install
     --mix-deps=MODE          auto (default) | copy | install
                              auto: copy node_modules/deps from this worktree
                              when the relevant lockfile is identical,
                              otherwise install for real. Doesn't apply to
                              _build (see below).
+                             link: share assets/node_modules via symlink when
+                             yarn.lock and package.json match; otherwise
+                             install an isolated copy.
     --no-ide                 Skip opening the IDE.
     --no-server              Skip printing the "how to start the server" hint.
 
@@ -231,15 +234,13 @@ up:
     gleam/build   primed by copying it from this worktree first, then always
                   built (`gleam build --target erlang`) — gleam's incremental
                   compilation actually benefits from the warm cache.
-    _build        NOT primed. Tried copying it (with mtime fixes and Elixir
-                  1.19's check_cwd:false, per
-                  https://ryanzidago.com/posts/reducing-elixir-worktree-setup-time-by-83-percent/)
-                  — Mix still fully recompiles regardless, since this project
-                  invalidates the manifest cache across worktree paths for
-                  reasons beyond cwd (likely Cldr's compile-time locale
-                  generation, among others). So `mix compile` here is always
-                  a full compile — still worth running during setup rather
-                  than at first `run-server`.
+    _build        Primed on Elixir 1.19.x. The copied Mix manifest's cwd is
+                  updated for this worktree and unchanged mix.exs/config
+                  files keep their base mtimes, avoiding a false full
+                  recompile caused by git worktree's fresh checkout mtimes.
+                  Mix compile still runs and decides what real branch
+                  changes need recompiling. Other Elixir versions safely
+                  fall back to the normal full-compile behavior.
 
   Starting the server is not automated — run the printed `run-server` command
   yourself, from whichever terminal you want it to live in. The worktree's
@@ -253,6 +254,8 @@ up:
   the start of setup and on any failure. Kept outside on purpose: a log dir
   inside the worktree would always show up as untracked in `git status` and
   make `remove` always need --force. `remove` cleans these up too.
+  Each setup also prints a wall-clock timing report; the detailed parallel-job
+  timeline is in timings.log in that log directory.
 
 open:
   worktree open <name-or-branch>
@@ -1156,7 +1159,12 @@ if [[ -z "$BRANCH" ]]; then
   exit 1
 fi
 
-for mode in "$ASSETS_DEPS_MODE" "$AUTOMATION_DEPS_MODE" "$MIX_DEPS_MODE"; do
+case "$ASSETS_DEPS_MODE" in
+  auto|copy|install|link) ;;
+  *) echo "Invalid deps mode for assets: $ASSETS_DEPS_MODE (use auto|copy|install|link)" >&2; exit 1 ;;
+esac
+
+for mode in "$AUTOMATION_DEPS_MODE" "$MIX_DEPS_MODE"; do
   case "$mode" in
     auto|copy|install) ;;
     *) echo "Invalid deps mode: $mode (use auto|copy|install)" >&2; exit 1 ;;
@@ -1169,6 +1177,25 @@ if $HAS_CONFIG; then
   echo "Generating worktree with your custom config ($CONFIG_FILE)."
 else
   echo "Generating worktree with the default config. Run 'worktree config' to define your own."
+fi
+
+if [[ "$ASSETS_DEPS_MODE" == "link" ]]; then
+  cat <<'EOF'
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!  SHARED NODE_MODULES MODE ENABLED                                  !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+assets/node_modules will be symlinked to the base worktree only when
+assets/yarn.lock and assets/package.json match exactly. This makes setup
+faster, but that worktree will not be fully isolated.
+
+Do not run yarn install, yarn add, yarn remove, or any command that writes
+inside assets/node_modules from a shared worktree: it may modify dependencies
+used by your other worktrees. If the files do not match, an isolated yarn
+install will run instead.
+
+EOF
 fi
 
 # --- worktree name -----------------------------------------------------------
@@ -1206,6 +1233,7 @@ fi
 
 # --- create the worktree -----------------------------------------------------
 
+UP_STARTED=$SECONDS
 echo "==> Preparing worktree '$NAME' for branch '$BRANCH' at $WORKTREE_PATH"
 
 git -C "$BASE_ROOT" fetch origin "$BRANCH" 2>/dev/null || true
@@ -1316,6 +1344,8 @@ if [[ -f "$WORKTREE_PATH/oli.env" ]]; then
   sync_worktree_port_env "$WORKTREE_PATH/oli.env" "$SERVER_PORT"
 fi
 
+PREPARATION_SECONDS=$(( SECONDS - UP_STARTED ))
+
 # --- dependency sync/install --------------------------------------------------
 
 STATUS_DIR="$(mktemp -d)"
@@ -1325,6 +1355,95 @@ STATUS_DIR="$(mktemp -d)"
 # `remove` below.
 LOG_DIR="$HOME/.cache/torus-worktree/logs/$NAME"
 mkdir -p "$LOG_DIR"
+TIMINGS_LOG="$LOG_DIR/timings.log"
+TIMING_DIR="$STATUS_DIR/timings"
+mkdir -p "$TIMING_DIR"
+: > "$TIMINGS_LOG"
+
+format_duration() {
+  local seconds="$1" hours minutes
+  hours=$(( seconds / 3600 ))
+  minutes=$(( (seconds % 3600) / 60 ))
+  seconds=$(( seconds % 60 ))
+
+  if (( hours > 0 )); then
+    printf '%dh %02dm %02ds' "$hours" "$minutes" "$seconds"
+  elif (( minutes > 0 )); then
+    printf '%dm %02ds' "$minutes" "$seconds"
+  else
+    printf '%ds' "$seconds"
+  fi
+}
+
+timing_event() {
+  local event="$1" stage="$2" elapsed="$3"
+  printf '%-8s %-5s %s\n' "$(format_duration "$elapsed")" "$event" "$stage" >> "$TIMINGS_LOG"
+}
+
+record_timing() {
+  local stage="$1" started="$2" elapsed
+  elapsed=$(( SECONDS - started ))
+  printf '%s\n' "$elapsed" > "$TIMING_DIR/$stage"
+  timing_event "END" "$stage" "$(( SECONDS - UP_STARTED ))"
+}
+
+timing_event "START" "preparation" 0
+timing_event "END" "preparation" "$PREPARATION_SECONDS"
+
+timing_value() {
+  cat "$TIMING_DIR/$1" 2>/dev/null || echo 0
+}
+
+timing_line() {
+  local label="$1" stage="$2" action="${3:-}" elapsed
+  elapsed="$(timing_value "$stage")"
+  printf '      %-40s %s' "$label" "$(format_duration "$elapsed")"
+  [[ -n "$action" ]] && printf '  (%s)' "$action"
+  printf '\n'
+}
+
+print_timing_report() {
+  local total parallel assets automation backend critical_tag="assets" critical_seconds
+  total=$(( SECONDS - UP_STARTED ))
+  parallel="$(timing_value parallel)"
+  assets="$(timing_value assets)"
+  automation="$(timing_value automation)"
+  backend="$(timing_value backend)"
+  critical_seconds="$assets"
+
+  if (( automation > critical_seconds )); then
+    critical_tag="automation"
+    critical_seconds="$automation"
+  fi
+  if (( backend > critical_seconds )); then
+    critical_tag="backend"
+  fi
+
+  echo
+  echo "==> Worktree setup timing report (wall-clock)"
+  printf '    Total elapsed: %s\n' "$(format_duration "$total")"
+  echo
+  echo "    Preparation"
+  printf '      %-40s %s\n' "Create worktree, copy local files, assign port" "$(format_duration "$PREPARATION_SECONDS")"
+  echo
+  echo "    Sequential setup"
+  timing_line "Mix dependencies" mix_deps "$(cat "$TIMING_DIR/mix.action" 2>/dev/null || true)"
+  echo
+  echo "    Parallel setup"
+  printf '      %-40s %s\n' "Wall-clock duration" "$(format_duration "$parallel")"
+  printf '      %-40s %s\n' "Critical path" "$critical_tag"
+  echo
+  timing_line "assets dependencies" assets "$(cat "$TIMING_DIR/assets.action" 2>/dev/null || true)"
+  timing_line "automation dependencies" automation "$(cat "$TIMING_DIR/automation.action" 2>/dev/null || true)"
+  timing_line "backend total" backend
+  timing_line "  Prime Gleam build" backend_gleam_prime
+  timing_line "  Gleam deps + build" backend_gleam_build
+  timing_line "  Normalize matching Mix input mtimes" backend_mtime_normalization
+  timing_line "  Prime _build + patch manifest" backend_mix_prime
+  timing_line "  Mix compile" backend_mix_compile
+  echo
+  echo "    Detailed start/end timeline: $TIMINGS_LOG"
+}
 
 fast_copy_dir() {
   local src="$1" dst="$2"
@@ -1360,50 +1479,161 @@ sync_deps() {
 
   if $do_copy; then
     log "$tag" "lockfile matches -> copying $copy_subdir from the base worktree"
+    printf 'copied %s (matching %s)' "$copy_subdir" "$lockfile_name" > "$TIMING_DIR/$tag.action"
     fast_copy_dir "$base_target" "$new_target"
   else
     log "$tag" "installing (mode: $mode)"
+    printf 'installed %s (mode: %s)' "$copy_subdir" "$mode" > "$TIMING_DIR/$tag.action"
     (cd "$new_work" && "${install_cmd[@]}")
+  fi
+}
+
+link_assets_deps() {
+  local base_assets="$BASE_ROOT/assets"
+  local new_assets="$WORKTREE_PATH/assets"
+  local base_target="$base_assets/node_modules"
+  local new_target="$new_assets/node_modules"
+
+  if [[ -d "$base_target" ]] \
+    && [[ -f "$base_assets/yarn.lock" && -f "$new_assets/yarn.lock" ]] \
+    && [[ -f "$base_assets/package.json" && -f "$new_assets/package.json" ]] \
+    && cmp -s "$base_assets/yarn.lock" "$new_assets/yarn.lock" \
+    && cmp -s "$base_assets/package.json" "$new_assets/package.json"; then
+    log "assets" "matching yarn.lock + package.json -> symlinking node_modules from the base worktree"
+    printf 'symlinked node_modules (matching yarn.lock + package.json)' > "$TIMING_DIR/assets.action"
+    rm -rf "$new_target"
+    ln -s "$base_target" "$new_target"
+  else
+    cat <<'EOF' >&2
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!  SHARED NODE_MODULES NOT SAFE — USING AN ISOLATED INSTALL           !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+assets/yarn.lock or assets/package.json differs from the base worktree,
+or the base node_modules directory is unavailable. This worktree will run
+yarn install instead of sharing dependencies.
+
+EOF
+    log "assets" "installing (link mode fallback)"
+    printf 'installed node_modules (link mode fallback)' > "$TIMING_DIR/assets.action"
+    (cd "$new_assets" && yarn install)
   fi
 }
 
 run_job() {
   local tag="$1"; shift
+  local started=$SECONDS
+  timing_event "START" "$tag" "$(( started - UP_STARTED ))"
   (
     set +e
     "$@" 2>&1 | sed -u "s/^/[$tag] /" | tee -a "$LOG_DIR/$tag.log"
-    echo "${PIPESTATUS[0]}" > "$STATUS_DIR/$tag"
+    local status="${PIPESTATUS[0]}"
+    echo "$status" > "$STATUS_DIR/$tag"
+    record_timing "$tag" "$started"
   ) &
 }
 
 assets_job() {
-  sync_deps "assets" "$ASSETS_DEPS_MODE" "assets" "yarn.lock" "node_modules" yarn install
+  if [[ "$ASSETS_DEPS_MODE" == "link" ]]; then
+    link_assets_deps
+  else
+    sync_deps "assets" "$ASSETS_DEPS_MODE" "assets" "yarn.lock" "node_modules" yarn install
+  fi
 }
 
 automation_job() {
   sync_deps "automation" "$AUTOMATION_DEPS_MODE" "assets/automation" "package-lock.json" "node_modules" npm i
 }
 
+preserve_matching_compile_input_mtimes() {
+  # A fresh `git worktree add` gives every checked-out file a new mtime. Mix
+  # uses mix.exs/config mtimes to decide whether it must re-evaluate compile
+  # configuration; preserve them only when the target file is byte-for-byte
+  # identical to the base worktree, so real branch changes stay visible.
+  local relative base_file target_file
+
+  for relative in mix.exs; do
+    base_file="$BASE_ROOT/$relative"
+    target_file="$WORKTREE_PATH/$relative"
+    if [[ -f "$base_file" && -f "$target_file" ]] && cmp -s "$base_file" "$target_file"; then
+      touch -r "$base_file" "$target_file"
+    fi
+  done
+
+  while IFS= read -r -d '' target_file; do
+    relative="${target_file#"$WORKTREE_PATH/"}"
+    base_file="$BASE_ROOT/$relative"
+    if [[ -f "$base_file" ]] && cmp -s "$base_file" "$target_file"; then
+      touch -r "$base_file" "$target_file"
+    fi
+  done < <(find "$WORKTREE_PATH/config" -type f -name '*.exs' -print0 2>/dev/null)
+}
+
+prime_mix_build() {
+  [[ -d "$BASE_ROOT/_build" ]] || return 0
+
+  local elixir_version manifest
+  elixir_version="$(cd "$WORKTREE_PATH" && elixir -e 'IO.write(System.version())' 2>/dev/null)" || return 0
+  [[ "$elixir_version" =~ ^1\.19\.[0-9]+ ]] || return 0
+
+  log "mix" "priming _build from the base worktree (Elixir $elixir_version)"
+  fast_copy_dir "$BASE_ROOT/_build" "$WORKTREE_PATH/_build"
+
+  manifest="$WORKTREE_PATH/_build/dev/lib/oli/.mix/compile.elixir"
+  if [[ -f "$manifest" ]] && elixir "$TOOL_ROOT/lib/patch_mix_manifest_cwd.exs" "$manifest" "$WORKTREE_PATH"; then
+    log "mix" "patched the compile manifest for this worktree's path"
+  else
+    log "mix" "manifest patch did not apply; mix compile will validate with its normal fallback"
+  fi
+}
+
 backend_job() {
+  local started status
+
   # `gleam build` must run before `mix compile`: mix's :gleam/:gleam_runtime
   # compilers (see mix.exs) expect gleam's erlang build output to already
   # exist on disk, and error out otherwise.
   if [[ -d "$BASE_ROOT/gleam/build" ]]; then
+    started=$SECONDS
+    timing_event "START" "backend_gleam_prime" "$(( started - UP_STARTED ))"
     log "gleam" "priming gleam/build from the base worktree"
     fast_copy_dir "$BASE_ROOT/gleam/build" "$WORKTREE_PATH/gleam/build"
+    status=$?
+    record_timing "backend_gleam_prime" "$started"
+    (( status == 0 )) || return "$status"
+  else
+    printf '0\n' > "$TIMING_DIR/backend_gleam_prime"
   fi
+  started=$SECONDS
+  timing_event "START" "backend_gleam_build" "$(( started - UP_STARTED ))"
   log "gleam" "gleam deps download + build --target erlang"
   (cd "$WORKTREE_PATH/gleam" && gleam deps download && gleam build --target erlang)
+  status=$?
+  record_timing "backend_gleam_build" "$started"
+  (( status == 0 )) || return "$status"
 
-  # No _build priming here: tried it (with mtime fixes and Elixir 1.19's
-  # check_cwd:false, per
-  # https://ryanzidago.com/posts/reducing-elixir-worktree-setup-time-by-83-percent/),
-  # Mix still fully recompiles regardless — this project invalidates the
-  # manifest cache across worktree paths for reasons beyond cwd (likely the
-  # Cldr compile-time locale generation, among others). Not worth chasing
-  # further; a full `mix compile` it is.
+  started=$SECONDS
+  timing_event "START" "backend_mtime_normalization" "$(( started - UP_STARTED ))"
+  preserve_matching_compile_input_mtimes
+  status=$?
+  record_timing "backend_mtime_normalization" "$started"
+  (( status == 0 )) || return "$status"
+
+  started=$SECONDS
+  timing_event "START" "backend_mix_prime" "$(( started - UP_STARTED ))"
+  prime_mix_build
+  status=$?
+  record_timing "backend_mix_prime" "$started"
+  (( status == 0 )) || return "$status"
+
+  started=$SECONDS
+  timing_event "START" "backend_mix_compile" "$(( started - UP_STARTED ))"
   log "mix" "mix compile"
   (cd "$WORKTREE_PATH" && mix compile)
+  status=$?
+  record_timing "backend_mix_compile" "$started"
+  return "$status"
 }
 
 # Synced here, before the parallel phase below, and NOT inside backend_job:
@@ -1412,16 +1642,22 @@ backend_job() {
 # already exist, so it can't run concurrently with the mix deps sync without
 # risking exactly that race.
 echo "==> Syncing mix deps (assets/ needs deps/ to exist before it can install)"
+MIX_DEPS_STARTED=$SECONDS
+timing_event "START" "mix_deps" "$(( MIX_DEPS_STARTED - UP_STARTED ))"
 sync_deps "mix" "$MIX_DEPS_MODE" "." "mix.lock" "deps" mix deps.get 2>&1 | tee -a "$LOG_DIR/mix-deps.log"
+record_timing "mix_deps" "$MIX_DEPS_STARTED"
 
 echo "==> Setting up environment (assets, automation, gleam+compile in parallel)"
 echo "    full logs in $LOG_DIR/"
 
+PARALLEL_STARTED=$SECONDS
+timing_event "START" "parallel" "$(( PARALLEL_STARTED - UP_STARTED ))"
 run_job "assets" assets_job
 run_job "automation" automation_job
 run_job "backend" backend_job
 
 wait
+record_timing "parallel" "$PARALLEL_STARTED"
 
 FAILED=false
 for tag in assets automation backend; do
@@ -1431,6 +1667,7 @@ for tag in assets automation backend; do
     FAILED=true
   fi
 done
+print_timing_report
 rm -rf "$STATUS_DIR"
 
 if $FAILED; then

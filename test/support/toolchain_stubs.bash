@@ -1,4 +1,4 @@
-# Fake yarn/npm/mix/gleam for testing `up` without the real oli-torus
+# Fake yarn/npm/mix/gleam/elixir for testing `up` without the real oli-torus
 # toolchain. Each stub just does the minimal thing worktree.sh's own logic
 # depends on seeing afterward (e.g. that node_modules/ exists), and logs
 # its invocation to $STUB_LOG so tests can assert whether it actually ran.
@@ -9,6 +9,8 @@
 # compile, run inside the parallel "backend" job) — set MIX_STUB_FAIL to
 # the specific subcommand to fail ("deps.get" or "compile"), not a bare
 # flag, or you'll fail both and never reach the parallel-jobs phase at all.
+# `elixir -e` reports ELIXIR_STUB_VERSION (default 1.19.2), while the
+# manifest patch invocation exits PATCH_STUB_EXIT (default 0).
 
 make_toolchain_stubs() {
   STUB_LOG="$(mktemp -d)/stub.log"
@@ -51,7 +53,17 @@ echo "gleam \$*" >> "$STUB_LOG"
 exit 0
 STUB
 
-  chmod +x "$TOOLCHAIN_STUB_BIN"/{yarn,npm,mix,gleam}
+  cat > "$TOOLCHAIN_STUB_BIN/elixir" <<STUB
+#!/usr/bin/env bash
+echo "elixir \$*" >> "$STUB_LOG"
+if [[ "\$1" == "-e" ]]; then
+  echo "\${ELIXIR_STUB_VERSION:-1.19.2}"
+  exit 0
+fi
+exit "\${PATCH_STUB_EXIT:-0}"
+STUB
+
+  chmod +x "$TOOLCHAIN_STUB_BIN"/{yarn,npm,mix,gleam,elixir}
   export PATH="$TOOLCHAIN_STUB_BIN:$PATH"
 }
 
@@ -66,6 +78,8 @@ make_up_ready_base() {
   echo '{}' > "$BASE/assets/automation/package.json"
   echo 'lockfile-v1' > "$BASE/assets/automation/package-lock.json"
   echo 'mix-lockfile-v1' > "$BASE/mix.lock"
+  mkdir -p "$BASE/config"
+  echo 'import Config' > "$BASE/config/config.exs"
   git -C "$BASE" add -A
   git -C "$BASE" commit -qm "add lockfiles for up tests"
 }

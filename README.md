@@ -29,14 +29,16 @@ This tool automates all of that, and reuses what it can from your existing
 checkout instead of redoing the work:
 - `node_modules` (`assets/`, `assets/automation/`) and `deps` are **copied**
   from your existing checkout when the relevant lockfile matches exactly
-  (instant, via clonefile/hardlink), and only actually re-installed when it
-  doesn't.
+  (using clonefile/hardlinks where available), and only actually re-installed
+  when it doesn't. `--assets-deps=link` is an explicit, faster alternative for
+  `assets/node_modules`: it shares the base directory by symlink only when
+  both `yarn.lock` and `package.json` match, otherwise it falls back to an
+  isolated `yarn install`.
 - `gleam/build` is primed the same way before running `gleam build` — its
   incremental compilation benefits from the warm cache.
-- `mix compile` always runs fully (tried caching `_build` across worktrees
-  too; doesn't help for this project — see `worktree --help` for why), but
-  it runs during setup instead of surprising you the first time you start
-  the server.
+- `_build` is primed on Elixir 1.19.x. The tool rewrites Mix's recorded cwd
+  in the copied manifest and preserves mtimes for unchanged compile inputs,
+  so Mix can reuse the warm build while still recompiling real branch changes.
 - The gitignored `oli.env` / `postgres.env` / `seeds.json` get copied over,
   since `git worktree add` only brings tracked files.
 - It picks a free port automatically and keeps `oli.env`'s `HTTP_PORT`,
@@ -46,6 +48,8 @@ checkout instead of redoing the work:
   on purpose: a log dir inside the worktree would always show up as
   untracked in `git status` and make `worktree remove` always need --force.
   `remove` cleans these up too.
+- Every `up` ends with a wall-clock timing report. Its detailed parallel-job
+  timeline lives in `~/.cache/torus-worktree/logs/<name>/timings.log`.
 
 Postgres and MinIO are **shared** across worktrees in this version (same DB,
 same buckets) — not isolated per worktree. Fine as long as branches don't
@@ -108,6 +112,7 @@ with another's.
 worktree config                       # optionally set your IDE command and preferred starting port
 worktree help                         # show the command reference
 worktree up MER-1234-some-branch      # create a worktree, set it up, open your IDE
+worktree up MER-1234-some-branch --assets-deps=link  # share matching assets/node_modules; see warning below
 worktree open a-more-descriptive-name # jump straight to one you already have (by folder name or branch)
 worktree list                         # see your worktrees, with created/last-commit dates (fast, no sizes)
 worktree list --size                  # same, with disk usage per worktree
@@ -131,6 +136,19 @@ Run `worktree --help` for the full picture — every flag, how `up` behaves
 when the branch or the worktree already exists, and the shell completion
 setup.
 
+### Shared `assets/node_modules`
+
+`worktree up --assets-deps=link` avoids copying the large assets dependency
+tree by symlinking it to the base worktree. It is opt-in because the linked
+worktree is not fully isolated: do not run `yarn install`, `yarn add`,
+`yarn remove`, or another command that writes inside `assets/node_modules`
+there. The command prints this warning before creating the worktree.
+
+It only creates the link when both `assets/yarn.lock` and
+`assets/package.json` match the base worktree exactly. If either differs (or
+the base directory is unavailable), it prints a clear fallback warning and
+runs an isolated `yarn install` instead.
+
 ## Updating and uninstalling
 
 ```bash
@@ -148,7 +166,7 @@ commit.
 
 ```bash
 brew install bats-core   # test runner (dev-only — never needed to use the tool)
-bats test/                # runs everything under test/
+bats test/                # runs everything under test/ (includes the pinned Elixir 1.19.2 manifest test)
 ```
 
 Every test creates its own throwaway git repo (satisfying the oli-torus
@@ -160,13 +178,6 @@ through a pty via `expect` (`test/support/run_select.exp`) instead of
 plain `bats run`.
 
 ## Future ideas
-
-- **Avoid the first `mix compile` entirely.** Keep investigating whether
-  `_build` can be replicated across worktrees so a fresh one doesn't need a
-  full compile at all. Copying it as-is doesn't work for this project (see
-  `worktree --help`), but there may be another angle worth trying (e.g. a
-  persistent build server, or fixing whatever specifically invalidates the
-  manifest beyond cwd).
 - **Per-worktree dev DB.** Right now Postgres (and MinIO) are shared across
   all worktrees. If branches with conflicting migrations become a real
   problem, worth adding an option for an isolated DB (and MinIO bucket set)
