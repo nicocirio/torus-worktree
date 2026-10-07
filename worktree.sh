@@ -199,7 +199,7 @@ Usage:
   worktree open <name-or-branch> [--no-ide] [--no-server]
   worktree remove <name> [<name2> ...] | --select | --all [options]
   worktree rename <name> <new-name>
-  worktree list [--size]
+  worktree list [--size] [--sort=KEY] [--reverse]
   worktree config
   worktree version
   worktree update
@@ -284,12 +284,19 @@ remove:
                              '2', '2 5 7', or a range like '4-6' (space or
                              comma separated); 'a' selects all, 'n' clears,
                              'd' confirms, 'q' cancels. Requires a real
-                             terminal (not piped input).
+                             terminal (not piped input). Missing directories
+                             are marked (missing); selecting one removes
+                             only its Git registration.
   worktree remove --all      Every worktree except the current one. Prints
                              the full list and asks for one confirmation
                              before removing anything.
 
   Options (apply to all three forms above):
+    --sort=KEY               name | branch | created (default) | last-commit.
+                             Same ordering rules as list below; applies to
+                             picker/preview and removal order, including
+                             explicitly named worktrees.
+    --reverse                Reverse the chosen order.
     --force                  Skip the "contains modified or untracked
                              files" retry question — force-remove any dirty
                              worktree in the batch right away.
@@ -300,6 +307,10 @@ remove:
                              (Default without either flag: ask once, after
                              removal, listing the branches that would go —
                              harder to undo, so it's opt-in per run.)
+
+  A registered worktree whose directory is missing can still be removed
+  by sibling name, full path, --select, or --all. Only the selected Git
+  registration is removed; other missing entries are left alone.
 
   Without --force, a worktree with modified or untracked files is left in
   place and reported at the end; without --delete-branches/--keep-branches,
@@ -317,7 +328,8 @@ rename:
                              the directory.
 
 list:
-  worktree list               Fast — path/branch/created/last-commit for
+  worktree list               Newest-created first by default.
+                               Fast — path/branch/created/last-commit for
                                each worktree, no disk usage. Doesn't shell
                                out to `du`. CREATED is the worktree
                                directory's birth time; LAST COMMIT is the
@@ -325,11 +337,22 @@ list:
                                after the worktree was created (otherwise
                                "—") so history from before the worktree
                                existed doesn't look like recent activity.
+                               Missing directories stay listed as (missing),
+                               with unavailable dates/sizes shown as "—".
   worktree list --size        Also shows disk usage per worktree (`du -sh`,
                                run in parallel across all of them so the wait
                                is bounded by the single biggest one, not the
                                sum — still not instant, expect a few seconds
                                with node_modules-sized trees).
+  Options (combinable with --size):
+    --sort=KEY               name | branch | created (default) | last-commit.
+                             Name/branch sort A-Z; dates newest first.
+                             LAST COMMIT uses the same eligibility rule as
+                             the displayed column above. Unknown dates stay
+                             last in either direction. Ties use full path A-Z.
+                             The current worktree follows the same order.
+    --reverse                Reverse the chosen order (oldest first for
+                             dates, Z-A for names/branches).
 
 config:
   Create/regenerate ~/.config/torus-worktree/config.sh, the personal
@@ -443,6 +466,56 @@ relative_time() {
   echo "$count $unit ago"
 }
 
+# Unknown birth/mtime is represented as 0 for numeric sorting.
+worktree_created_epoch() {
+  local path="$1" epoch
+  epoch="$(stat -f %B "$path" 2>/dev/null || true)"
+  if [[ -z "$epoch" || "$epoch" == 0 ]]; then
+    epoch="$(stat -f %m "$path" 2>/dev/null || true)"
+  fi
+  printf '%s\n' "${epoch:-0}"
+}
+
+# sort_worktrees <key> <reverse> — sorts path<TAB>branch records on stdin.
+# Date keys use raw epochs, not rounded labels. Unknown dates always go last;
+# equal keys use the full path ascending for deterministic picker numbering.
+sort_worktrees() {
+  local sort_by="$1" reverse_sort="$2" path branch key unknown created_epoch
+  local -a sort_flags=(-t $'\t' -k1,1n)
+  case "$sort_by" in
+    created|last-commit)
+      if $reverse_sort; then sort_flags+=(-k2,2n)
+      else sort_flags+=(-k2,2nr)
+      fi
+      ;;
+    *)
+      if $reverse_sort; then sort_flags+=(-k2,2r)
+      else sort_flags+=(-k2,2)
+      fi
+      ;;
+  esac
+  while IFS=$'\t' read -r path branch; do
+    unknown=0
+    case "$sort_by" in
+      name) key="$(basename "$path")" ;;
+      branch) key="$branch" ;;
+      created) key="$(worktree_created_epoch "$path")" ;;
+      last-commit)
+        created_epoch="$(worktree_created_epoch "$path")"
+        key="$(git -C "$path" log -1 --format=%ct 2>/dev/null || true)"
+        # Match LAST COMMIT's display: older branch history is not activity.
+        if [[ -z "$key" ]] || (( created_epoch == 0 || key < created_epoch )); then
+          key=0
+        fi
+        ;;
+    esac
+    if [[ "$sort_by" == created || "$sort_by" == last-commit ]] && [[ "$key" == 0 ]]; then
+      unknown=1
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$unknown" "$key" "$path" "$branch"
+  done | LC_ALL=C sort "${sort_flags[@]}" -k3,3 | cut -f3-
+}
+
 # worktree_dates — prints "<created-relative>\t<last-commit-relative>" for a
 # worktree path. The commit half is left blank unless it's at-or-after the
 # worktree's own creation (>=, not >: a commit made in the same wall-clock
@@ -451,10 +524,12 @@ relative_time() {
 # that old work as if it happened in this worktree, which it didn't.
 worktree_dates() {
   local path="$1" created_epoch commit_epoch
-  created_epoch="$(stat -f %B "$path" 2>/dev/null)"
-  # Birth time is 0 on filesystems that don't track it; fall back to mtime.
-  [[ -z "$created_epoch" || "$created_epoch" == "0" ]] && created_epoch="$(stat -f %m "$path" 2>/dev/null)"
-  commit_epoch="$(git -C "$path" log -1 --format=%ct 2>/dev/null)"
+  created_epoch="$(worktree_created_epoch "$path")"
+  if [[ "$created_epoch" == 0 ]]; then
+    printf '—\t—\n'
+    return 0
+  fi
+  commit_epoch="$(git -C "$path" log -1 --format=%ct 2>/dev/null || true)"
   local commit_rel=""
   if [[ -n "$commit_epoch" ]] && (( commit_epoch >= created_epoch )); then
     commit_rel="$(relative_time "$commit_epoch")"
@@ -468,6 +543,7 @@ worktree_dates() {
 # the current one, lets the user toggle by number/range, and leaves the
 # chosen paths in $SELECTED_TARGETS.
 select_worktrees_interactively() {
+  local sort_by="$1" reverse_sort="$2"
   if [[ ! -t 0 || ! -t 1 ]]; then
     echo "worktree remove --select needs an interactive terminal." >&2
     echo "Use 'worktree remove <name>...' or 'worktree remove --all' instead." >&2
@@ -478,7 +554,9 @@ select_worktrees_interactively() {
   while IFS=$'\t' read -r path branch; do
     [[ "$path" == "$BASE_ROOT" ]] && continue
     paths+=("$path")
-    branches+=("$branch")
+    local branch_col="$branch"
+    [[ -d "$path" ]] || branch_col="$branch (missing)"
+    branches+=("$branch_col")
     names+=("$(basename "$path")")
     checked+=("false")
     local created last_commit
@@ -486,7 +564,7 @@ select_worktrees_interactively() {
     [[ -z "$last_commit" ]] && last_commit="—"
     createds+=("$created")
     last_commits+=("$last_commit")
-  done < <(list_worktrees)
+  done < <(list_worktrees | sort_worktrees "$sort_by" "$reverse_sort")
 
   if [[ ${#paths[@]} -eq 0 ]]; then
     echo "No other worktrees to select from." >&2
@@ -697,12 +775,21 @@ open_existing_worktree() {
 case "$SUBCOMMAND" in
   list)
     show_size=false
+    sort_by=created
+    reverse_sort=false
     for arg in "$@"; do
       case "$arg" in
         --size) show_size=true ;;
+        --sort=*) sort_by="${arg#*=}" ;;
+        --reverse) reverse_sort=true ;;
         *) echo "Unknown option for list: $arg" >&2; exit 1 ;;
       esac
     done
+
+    case "$sort_by" in
+      name|branch|created|last-commit) ;;
+      *) echo "Invalid sort key: $sort_by (expected name|branch|created|last-commit)." >&2; exit 1 ;;
+    esac
 
     if ! $show_size; then
       rows=()
@@ -714,6 +801,7 @@ case "$SUBCOMMAND" in
         name="$(basename "$path")"
         marker=""
         [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
+        [[ -d "$path" ]] || marker="$marker (missing)"
         branch_col="$branch$marker"
         IFS=$'\t' read -r created last_commit < <(worktree_dates "$path")
         [[ -z "$last_commit" ]] && last_commit="—"
@@ -721,7 +809,7 @@ case "$SUBCOMMAND" in
         (( ${#branch_col} > branch_width )) && branch_width=${#branch_col}
         (( ${#created} > created_width )) && created_width=${#created}
         rows+=("$name"$'\t'"$branch_col"$'\t'"$created"$'\t'"$last_commit")
-      done < <(list_worktrees)
+      done < <(list_worktrees | sort_worktrees "$sort_by" "$reverse_sort")
       printf "%-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$NAME_HEADER" "$BRANCH_HEADER" "$CREATED_HEADER" "LAST COMMIT"
       for row in "${rows[@]}"; do
         IFS=$'\t' read -r name branch_col created last_commit <<< "$row"
@@ -738,8 +826,12 @@ case "$SUBCOMMAND" in
       idx="$(printf "%03d" "$i")"
       IFS=$'\t' read -r created last_commit < <(worktree_dates "$path")
       printf '%s\t%s\t%s\t%s\n' "$path" "$branch" "$created" "$last_commit" > "$tmp_dir/$idx.meta"
-      ( du -sh "$path" 2>/dev/null | cut -f1 > "$tmp_dir/$idx.size" ) &
-    done < <(list_worktrees)
+      if [[ -d "$path" ]]; then
+        ( du -sh "$path" 2>/dev/null | cut -f1 > "$tmp_dir/$idx.size" ) &
+      else
+        printf '—\n' > "$tmp_dir/$idx.size"
+      fi
+    done < <(list_worktrees | sort_worktrees "$sort_by" "$reverse_sort")
     wait
 
     # Two passes: first measure the widest name/branch/created so columns
@@ -754,6 +846,7 @@ case "$SUBCOMMAND" in
       name="$(basename "$path")"
       marker=""
       [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
+      [[ -d "$path" ]] || marker="$marker (missing)"
       branch_col="$branch$marker"
       (( ${#name} > name_width )) && name_width=${#name}
       (( ${#branch_col} > branch_width )) && branch_width=${#branch_col}
@@ -766,6 +859,7 @@ case "$SUBCOMMAND" in
       size="$(cat "${meta%.meta}.size" 2>/dev/null)"
       marker=""
       [[ "$path" == "$BASE_ROOT" ]] && marker=" (current)"
+      [[ -d "$path" ]] || marker="$marker (missing)"
       [[ -z "$last_commit" ]] && last_commit="—"
       printf "%-8s %-${name_width}s %-${branch_width}s %-${created_width}s %s\n" "$size" "$(basename "$path")" "$branch$marker" "$created" "$last_commit"
     done
@@ -805,6 +899,8 @@ case "$SUBCOMMAND" in
     ;;
 
   remove)
+    sort_by=created
+    reverse_sort=false
     select_mode=false
     all_mode=false
     force_mode=false
@@ -813,6 +909,8 @@ case "$SUBCOMMAND" in
 
     for arg in "$@"; do
       case "$arg" in
+        --sort=*) sort_by="${arg#*=}" ;;
+        --reverse) reverse_sort=true ;;
         --select) select_mode=true ;;
         --all) all_mode=true ;;
         --force) force_mode=true ;;
@@ -838,6 +936,11 @@ case "$SUBCOMMAND" in
       esac
     done
 
+    case "$sort_by" in
+      name|branch|created|last-commit) ;;
+      *) echo "Invalid sort key: $sort_by (expected name|branch|created|last-commit)." >&2; exit 1 ;;
+    esac
+
     mode_count=0
     $select_mode && mode_count=$((mode_count + 1))
     $all_mode && mode_count=$((mode_count + 1))
@@ -857,7 +960,7 @@ case "$SUBCOMMAND" in
     remove_targets=()
 
     if $select_mode; then
-      select_worktrees_interactively
+      select_worktrees_interactively "$sort_by" "$reverse_sort"
       if [[ ${#SELECTED_TARGETS[@]} -eq 0 ]]; then
         echo "Nothing selected."
         exit 0
@@ -867,7 +970,7 @@ case "$SUBCOMMAND" in
       while IFS=$'\t' read -r path branch; do
         [[ "$path" == "$BASE_ROOT" ]] && continue
         remove_targets+=("$path")
-      done < <(list_worktrees)
+      done < <(list_worktrees | sort_worktrees "$sort_by" "$reverse_sort")
 
       if [[ ${#remove_targets[@]} -eq 0 ]]; then
         echo "No other worktrees to remove."
@@ -887,6 +990,8 @@ case "$SUBCOMMAND" in
       for name in "${names[@]}"; do
         if [[ -d "$name" ]]; then
           remove_targets+=("$(cd "$name" && pwd)")
+        elif [[ "$name" == /* ]]; then
+          remove_targets+=("$name")
         else
           remove_targets+=("$(dirname "$BASE_ROOT")/$name")
         fi
@@ -895,13 +1000,20 @@ case "$SUBCOMMAND" in
 
     # --- validate + dedupe -------------------------------------------------
 
+    registered_worktrees="$(list_worktrees)"
+    registered_paths=()
+    while IFS=$'\t' read -r path branch; do
+      registered_paths+=("$path")
+    done <<< "$registered_worktrees"
+
     valid_targets=()
     for p in "${remove_targets[@]}"; do
       if [[ "$p" == "$BASE_ROOT" ]]; then
         echo "Skipping $(basename "$p") — that's the worktree you're running this from." >&2
         continue
       fi
-      if [[ ! -e "$p" ]]; then
+      # Git can remove just this registration even when its directory is gone.
+      if [[ ! -e "$p" ]] && ! is_in_array "$p" "${registered_paths[@]}"; then
         echo "Skipping $(basename "$p") — no worktree found at $p." >&2
         continue
       fi
@@ -915,6 +1027,19 @@ case "$SUBCOMMAND" in
       echo "Nothing to remove." >&2
       echo "See your current worktrees: worktree list" >&2
       exit 1
+    fi
+
+    if ! $select_mode && ! $all_mode; then
+      sorted_targets=()
+      while IFS=$'\t' read -r path branch; do
+        sorted_targets+=("$path")
+      done < <(
+        for p in "${valid_targets[@]}"; do
+          branch="$(awk -F'\t' -v pp="$p" '$1==pp{print $2}' <<< "$registered_worktrees")"
+          printf '%s\t%s\n' "$p" "$branch"
+        done | sort_worktrees "$sort_by" "$reverse_sort"
+      )
+      valid_targets=("${sorted_targets[@]}")
     fi
 
     # --- remove each target, deferring dirty-worktree confirmation to one

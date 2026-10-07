@@ -387,6 +387,23 @@ built with explicit `return` concatenation for line breaks:
 `Worktree name: <name>`, `Branch: <branch>`, blank line, then the
 `run-server` hint.
 
+### Shared list/removal sorting
+
+`list` and every removal mode use the same path/branch record sorter, defaulting
+to `created` newest first. Numeric epoch keys avoid ordering by rounded labels
+(e.g. two "2 days ago" values can still differ). `last-commit` uses the display's
+eligibility rule: a commit predating checkout creation is unknown, rather than
+recent work in that checkout. Unknown date keys form a separate final group,
+so `--reverse` never pulls missing dates to the top. Full paths break ties in
+ascending byte order to keep picker numbering deterministic. Completion data
+keeps its existing order; sorting is applied by the user-facing commands.
+
+The interface follows the existing `--assets-deps=MODE` spelling for valued
+options and boolean flags for toggles. Named removal targets are validated and
+deduplicated before sorting; `--all` and `--select` preserve the same order from
+their preview through removal. Dirty targets still follow the existing deferred
+batch confirmation, so confirmed forced removals happen after clean removals.
+
 ### Shell completion (zsh only)
 
 `#compdef worktree wt` + explicit `compdef _worktree worktree wt` in
@@ -489,6 +506,19 @@ if you need it" in `--help` rather than half-implemented.
   non-zero, and is this statement exempt from set -e" as a standing
   question for every new `var=$(...)` or pipe added to this script, not
   just something to catch after the fact.
+
+- **Registered worktrees can outlive their directories.** A temporary
+  review checkout disappeared from `/tmp` but stayed in `git worktree list`.
+  The date helper's `stat` then failed inside a process substitution; its
+  caller's `read` saw EOF, and `set -e` killed `list` before the buffered
+  table printed. Date lookup now returns placeholders when metadata is
+  unavailable, and `list` labels missing paths explicitly. It keeps Git's
+  registration visible instead of pruning it automatically: a path can
+  also be temporarily unavailable (for example, on an unmounted disk).
+  Explicit removal now validates against Git's registrations as well as
+  directory existence, so a selected missing path can be passed to
+  `git worktree remove`. That removes only the chosen registration, unlike
+  a global `git worktree prune` which could affect unselected missing paths.
 
 ## Things we tried and reverted
 

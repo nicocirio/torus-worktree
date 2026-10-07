@@ -177,3 +177,127 @@ load test_helper
   [ "$status" -eq 1 ]
   [[ "$output" == *"that's the worktree you're running this from"* ]]
 }
+
+load support/sort_fixtures
+
+@test "remove by names: default creation order replaces argument order" {
+  make_sort_fixture
+  run "$WT" remove old new --keep-branches
+  [ "$status" -eq 0 ]
+  [ "$(awk '/^Removed worktree at/ {sub(/\.$/, "", $NF); sub(/^.*\//, "", $NF); print $NF}' <<< "$output")" = $'new\nold' ]
+  ! worktree_exists old
+  ! worktree_exists new
+}
+
+@test "remove by names: explicit branch order and reverse apply with force and branch deletion" {
+  make_sort_fixture
+  export SORT_OLD_CREATED="$((SORT_NOW - 10))"
+  echo scratch > "$TEST_ROOT/old/untracked"
+  run "$WT" remove --reverse new --sort=branch old --force --delete-branches
+  [ "$status" -eq 0 ]
+  [ "$(awk '/^Removed worktree at/ {sub(/\.$/, "", $NF); sub(/^.*\//, "", $NF); print $NF}' <<< "$output")" = $'new\nold' ]
+  ! branch_exists a-branch
+  ! branch_exists z-branch
+}
+
+@test "remove by names: last-commit order and duplicate arguments" {
+  make_sort_fixture
+  run "$WT" remove new old old --sort=last-commit --keep-branches
+  [ "$status" -eq 0 ]
+  [ "$(awk '/^Removed worktree at/ {sub(/\.$/, "", $NF); sub(/^.*\//, "", $NF); print $NF}' <<< "$output")" = $'old\nnew' ]
+}
+
+@test "remove --all: default created order applies to preview and removal" {
+  make_sort_fixture
+  run bash -c 'echo y | "$1" remove --all --keep-branches' _ "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(awk '/^  - / {print $2}' <<< "$output")" = $'new\nold' ]
+  [ "$(awk '/^Removed worktree at/ {sub(/\.$/, "", $NF); sub(/^.*\//, "", $NF); print $NF}' <<< "$output")" = $'new\nold' ]
+  [ -d "$BASE" ]
+}
+
+@test "remove --all: explicit name sort and reverse order the confirmation" {
+  make_sort_fixture
+  run bash -c 'echo n | "$1" remove --sort=name --all --reverse' _ "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(awk '/^  - / {print $2}' <<< "$output")" = $'old\nnew' ]
+  worktree_exists old
+  worktree_exists new
+}
+
+@test "remove: invalid and empty sort fail before any selection or removal" {
+  make_sort_fixture
+  for mode in old --all --select; do
+    for value in bogus ''; do
+      run "$WT" remove "$mode" "--sort=$value" --force --delete-branches
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"Invalid sort key"*"name|branch|created|last-commit"* ]]
+      worktree_exists old
+      worktree_exists new
+    done
+  done
+}
+
+@test "remove: missing registered directory can be removed by name without pruning others" {
+  make_detached_worktree gone
+  make_detached_worktree other-gone
+  mv "$TEST_ROOT/gone" "$TEST_ROOT/unregistered"
+  mv "$TEST_ROOT/other-gone" "$TEST_ROOT/other-unregistered"
+  run "$WT" remove gone
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Removed worktree at $TEST_ROOT/gone."* ]]
+  run worktree_exists gone
+  [ "$status" -eq 1 ]
+  worktree_exists other-gone
+  [ -d "$TEST_ROOT/unregistered" ]
+  [ -d "$TEST_ROOT/other-unregistered" ]
+}
+
+@test "remove: missing registered directory outside sibling folder accepts its full path" {
+  mkdir "$TEST_ROOT/elsewhere"
+  git worktree add -q --detach "$TEST_ROOT/elsewhere/gone"
+  mv "$TEST_ROOT/elsewhere/gone" "$TEST_ROOT/elsewhere/unregistered"
+  run "$WT" remove "$TEST_ROOT/elsewhere/gone"
+  [ "$status" -eq 0 ]
+  [ "$(git worktree list --porcelain | awk -v p="$TEST_ROOT/elsewhere/gone" '$0 == "worktree " p {n++} END {print n+0}')" -eq 0 ]
+  [ -d "$TEST_ROOT/elsewhere/unregistered" ]
+}
+
+@test "remove --all: removes missing registrations as well as existing worktrees" {
+  make_detached_worktree gone
+  make_worktree kept
+  mv "$TEST_ROOT/gone" "$TEST_ROOT/unregistered"
+  run bash -c 'echo y | "$1" remove --all --keep-branches' _ "$WT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Removed worktree at $TEST_ROOT/gone."* ]]
+  run worktree_exists gone
+  [ "$status" -eq 1 ]
+  run worktree_exists kept
+  [ "$status" -eq 1 ]
+  [ -d "$BASE" ]
+  [ -d "$TEST_ROOT/unregistered" ]
+}
+
+@test "remove: missing registration honors explicit branch deletion" {
+  make_worktree gone
+  mv "$TEST_ROOT/gone" "$TEST_ROOT/unregistered"
+  run "$WT" remove gone --delete-branches
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Removed worktree at $TEST_ROOT/gone."* ]]
+  run worktree_exists gone
+  [ "$status" -eq 1 ]
+  run branch_exists gone
+  [ "$status" -eq 1 ]
+  [ -d "$TEST_ROOT/unregistered" ]
+}
+
+@test "remove: locked missing registration stays registered even with force" {
+  make_detached_worktree gone
+  git worktree lock "$TEST_ROOT/gone"
+  mv "$TEST_ROOT/gone" "$TEST_ROOT/unregistered"
+  run "$WT" remove gone --force
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"locked"* ]]
+  worktree_exists gone
+  [ -d "$TEST_ROOT/unregistered" ]
+}

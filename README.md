@@ -114,14 +114,41 @@ worktree help                         # show the command reference
 worktree up MER-1234-some-branch      # create a worktree, set it up, open your IDE
 worktree up MER-1234-some-branch --assets-deps=link  # share matching assets/node_modules; see warning below
 worktree open a-more-descriptive-name # jump straight to one you already have (by folder name or branch)
-worktree list                         # see your worktrees, with created/last-commit dates (fast, no sizes)
+worktree list                         # newest-created first, with created/last-commit dates (fast, no sizes)
 worktree list --size                  # same, with disk usage per worktree
+worktree list --sort=last-commit       # most recent eligible commit first
+worktree list --reverse               # oldest-created first
 worktree rename MER-1234-some-branch a-more-descriptive-name  # rename the folder
 worktree remove MER-1234-some-branch  # clean one up when you're done
 worktree remove foo bar baz           # or several by name at once (tab-completes each one)
 worktree remove --select              # checkbox picker across all your worktrees, then remove
 worktree remove --all --delete-branches  # nuke every worktree but the current one, branches included
 run-server                            # from inside a worktree, start Phoenix on its assigned port
+```
+
+`list` keeps registered worktrees whose directories are missing visible as
+`(missing)`, with unavailable dates and disk usage shown as `—`.
+
+`list` and every form of `remove` share `--sort=name|branch|created|last-commit`
+and `--reverse`. The default is `created`, newest first. Name/branch sort A-Z;
+`--reverse` switches to Z-A or oldest first. Unknown dates stay last in either
+direction; ties use full path A-Z. The current worktree follows the same order
+in `list` and is excluded from removal. `last-commit` orders by the displayed
+LAST COMMIT column's underlying timestamp, so branch history predating the
+worktree counts as unknown. Sorting uses exact timestamps, not rounded labels.
+
+`remove` can also remove a registered worktree whose directory is missing:
+use its sibling name, full path, `--select`, or `--all`. The picker marks it as
+`(missing)`. Removing it clears only that Git registration, without pruning
+other missing entries.
+
+For `remove`, sorting applies to the picker, `--all` preview, and removal order,
+including explicitly named worktrees. For example:
+
+```bash
+worktree remove --select --sort=last-commit
+worktree remove --all --reverse --keep-branches
+worktree remove foo bar --sort=name
 ```
 
 `remove` also takes these flags, combinable with a name, several names, `--select`,

@@ -72,6 +72,11 @@ _worktree() {
         candidates+=("${raw}:existing worktree")
       done
       candidates+=(
+        '--sort=name:sort names A-Z'
+        '--sort=branch:sort branches A-Z'
+        '--sort=created:sort newest-created first (default)'
+        '--sort=last-commit:sort newest eligible commit first'
+        '--reverse:reverse the chosen order'
         '--select:interactive checkbox picker'
         '--all:target every worktree except the current one'
         '--force:skip the dirty-worktree confirm, force-remove right away'
@@ -87,6 +92,18 @@ _worktree() {
         _describe 'worktree' names
       fi
       # CURRENT == 4 (the new name) is free text — nothing to suggest.
+      ;;
+    list)
+      local -a options
+      options=(
+        '--size:show disk usage'
+        '--sort=name:sort names A-Z'
+        '--sort=branch:sort branches A-Z'
+        '--sort=created:sort newest-created first (default)'
+        '--sort=last-commit:sort newest eligible commit first'
+        '--reverse:reverse the chosen order'
+      )
+      _describe 'option' options
       ;;
     uninstall)
       if (( CURRENT == 3 )); then

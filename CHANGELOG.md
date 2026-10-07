@@ -10,6 +10,11 @@ not just *what*, see `docs/design-notes.md`.
 ## [Unreleased]
 
 ### Added
+- `worktree list` and all forms of `worktree remove` accept
+  `--sort=name|branch|created|last-commit` and `--reverse`, with zsh completion.
+  Dates sort newest first and names/branches A-Z; unknown dates stay last
+  even when reversed. The same ordering applies to the removal picker,
+  preview, and explicitly named targets.
 - `worktree up` now primes `_build` for Oli's Elixir 1.19.x toolchain. It
   patches Mix's copied manifest cwd and preserves mtimes of unchanged compile
   inputs, avoiding the otherwise unnecessary full Elixir rebuild in a fresh
@@ -57,7 +62,21 @@ not just *what*, see `docs/design-notes.md`.
   real oli-torus toolchain. Every subcommand now has at least some test
   coverage.
 
+### Changed
+- `worktree list` (including `--size`) and all removal modes now default to
+  newest-created first instead of Git's registration order or argument order.
+  The current worktree follows the same order in `list`.
+
 ### Fixed
+- `worktree remove` accepts registered worktrees whose directories are
+  missing, by sibling name, full path, `--select`, or `--all`, instead of
+  skipping them with "Nothing to remove". The picker marks them as
+  `(missing)`; removing one clears only its selected Git registration.
+- `worktree list` no longer exits silently when Git still registers a
+  worktree whose directory is missing (for example, a deleted temporary
+  checkout). Both list modes show it as `(missing)`, with `—` for
+  unavailable dates and disk usage. Unavailable commit history also no
+  longer aborts the shared date lookup used by `remove --select`.
 - `PLAYWRIGHT_BASE_URL` now uses `localhost` instead of `127.0.0.1`,
   matching `HOST` — the mismatch could silently drop the browser session
   on OAuth/LTI/payment redirect flows.

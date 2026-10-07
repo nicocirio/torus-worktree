@@ -4,6 +4,7 @@
 # real terminal (`-t 0`/`-t 1`) and bats itself has no tty to give it.
 #
 # Usage: run_select.exp <cwd> <worktree_script> <input1> [<input2> ...]
+# Optional flags go before a `--` separator after <worktree_script>.
 # Sends each input, in order, at whichever prompt (the picker's "> " or a
 # "[y/N] " confirmation) appears next. The caller must supply exactly as
 # many inputs as prompts the scenario will actually produce.
@@ -13,8 +14,15 @@ set cwd [lindex $argv 0]
 set wt [lindex $argv 1]
 set inputs [lrange $argv 2 end]
 
+set options {}
+set separator [lsearch -exact $inputs --]
+if {$separator >= 0} {
+  set options [lrange $inputs 0 [expr {$separator - 1}]]
+  set inputs [lrange $inputs [expr {$separator + 1}] end]
+}
+
 cd $cwd
-spawn $wt remove --select
+spawn $wt remove --select {*}$options
 
 foreach in $inputs {
   expect {

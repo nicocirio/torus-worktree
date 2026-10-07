@@ -23,10 +23,9 @@ RUN_SELECT="$BATS_TEST_DIRNAME/support/run_select.exp"
 @test "select: toggling the LAST-listed item and confirming does not crash (regression)" {
   make_worktree aaa
   make_worktree zzz
-  # git worktree list order is insertion order here, so zzz is listed last;
-  # toggling only the last entry is exactly the case that used to kill the
-  # whole script silently under set -e.
-  run "$RUN_SELECT" "$BASE" "$WT" "2" "d" "n"
+  # Pin alphabetical order so the last-listed item is always zzz.
+  # Selecting it used to expose an implicit nonzero function return.
+  run "$RUN_SELECT" "$BASE" "$WT" --sort=name -- "2" "d" "n"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Removed worktree at"* ]]
   worktree_exists aaa
@@ -80,4 +79,50 @@ RUN_SELECT="$BATS_TEST_DIRNAME/support/run_select.exp"
   [ "$status" -eq 0 ]
   [[ "$output" != *"Also delete"* ]]
   ! worktree_exists foo
+}
+
+load support/sort_fixtures
+
+@test "select: default created order determines row numbers and selection" {
+  make_sort_fixture
+  run "$RUN_SELECT" "$BASE" "$WT" "1" "d" "n"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 [ ] new"*"2 [ ] old"* ]]
+  ! worktree_exists new
+  worktree_exists old
+}
+
+@test "select: name sort and reverse determine row numbers and removal" {
+  make_sort_fixture
+  run "$RUN_SELECT" "$BASE" "$WT" --sort=name --reverse --keep-branches -- "1" "d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 [ ] old"*"2 [ ] new"* ]]
+  ! worktree_exists old
+  worktree_exists new
+}
+
+@test "select: last-commit sort and reverse apply to all selected targets" {
+  make_sort_fixture
+  run "$RUN_SELECT" "$BASE" "$WT" --reverse --sort=last-commit --keep-branches -- "a" "d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 [ ] new"*"2 [ ] old"* ]]
+  [[ "$output" == *"Removed worktree at $TEST_ROOT/new."*"Removed worktree at $TEST_ROOT/old."* ]]
+  ! worktree_exists old
+  ! worktree_exists new
+}
+
+@test "select: selected missing registration is removed without pruning unselected entries" {
+  make_detached_worktree aaa-gone
+  make_detached_worktree zzz-gone
+  mv "$TEST_ROOT/aaa-gone" "$TEST_ROOT/aaa-unregistered"
+  mv "$TEST_ROOT/zzz-gone" "$TEST_ROOT/zzz-unregistered"
+  run "$RUN_SELECT" "$BASE" "$WT" --sort=name -- "1" "d"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(detached) (missing)"* ]]
+  [[ "$output" == *"Removed worktree at $TEST_ROOT/aaa-gone."* ]]
+  run worktree_exists aaa-gone
+  [ "$status" -eq 1 ]
+  worktree_exists zzz-gone
+  [ -d "$TEST_ROOT/aaa-unregistered" ]
+  [ -d "$TEST_ROOT/zzz-unregistered" ]
 }
